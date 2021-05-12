@@ -2143,8 +2143,8 @@ bool isWaypointReached(const navWaypointPosition_t * waypoint, const bool isWayp
 static void updateHomePositionCompatibility(void)
 {
     geoConvertLocalToGeodetic(&GPS_home, &posControl.gpsOrigin, &posControl.rthState.homePosition.pos);
-    GPS_distanceToHome = posControl.homeDistance / 100;
-    GPS_directionToHome = posControl.homeDirection / 100;
+    GPS_distanceToHome = posControl.homeDistance * 0.01f;
+    GPS_directionToHome = posControl.homeDirection * 0.01f;
 }
 
 // Backdoor for RTH estimator
@@ -3736,8 +3736,8 @@ void onNewGPSData(void)
             uint32_t dist;
             int32_t dir;
             GPS_distance_cm_bearing(gpsSol.llh.lat, gpsSol.llh.lon, GPS_home.lat, GPS_home.lon, &dist, &dir);
-            GPS_distanceToHome = dist / 100;
-            GPS_directionToHome = lrintf(dir / 100.0f);
+            GPS_distanceToHome = dist * 0.01f;
+            GPS_directionToHome = lrintf(dir * 0.01f);
         } else {
             GPS_distanceToHome = 0;
             GPS_directionToHome = 0;

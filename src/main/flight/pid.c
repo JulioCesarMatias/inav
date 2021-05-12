@@ -513,7 +513,7 @@ static float calculateFixedWingTPAFactor(uint16_t throttle)
         }
 
         // Attenuate TPA curve according to configured amount
-        tpaFactor = 1.0f + (tpaFactor - 1.0f) * (currentControlRateProfile->throttle.dynPID / 100.0f);
+        tpaFactor = 1.0f + (tpaFactor - 1.0f) * (currentControlRateProfile->throttle.dynPID * 0.01f);
     }
     else {
         tpaFactor = 1.0f;
@@ -530,9 +530,9 @@ static float calculateMultirotorTPAFactor(void)
     if (currentControlRateProfile->throttle.dynPID == 0 || rcCommand[THROTTLE] < currentControlRateProfile->throttle.pa_breakpoint) {
         tpaFactor = 1.0f;
     } else if (rcCommand[THROTTLE] < motorConfig()->maxthrottle) {
-        tpaFactor = (100 - (uint16_t)currentControlRateProfile->throttle.dynPID * (rcCommand[THROTTLE] - currentControlRateProfile->throttle.pa_breakpoint) / (float)(motorConfig()->maxthrottle - currentControlRateProfile->throttle.pa_breakpoint)) / 100.0f;
+        tpaFactor = (100 - (uint16_t)currentControlRateProfile->throttle.dynPID * (rcCommand[THROTTLE] - currentControlRateProfile->throttle.pa_breakpoint) / (float)(motorConfig()->maxthrottle - currentControlRateProfile->throttle.pa_breakpoint)) * 0.01f;
     } else {
-        tpaFactor = (100 - currentControlRateProfile->throttle.dynPID) / 100.0f;
+        tpaFactor = (100 - currentControlRateProfile->throttle.dynPID) * 0.01f;
     }
 
     return tpaFactor;
@@ -620,8 +620,8 @@ static float calcHorizonRateMagnitude(void)
     // Figure out the raw stick positions
     const int32_t stickPosAil = ABS(getRcStickDeflection(FD_ROLL));
     const int32_t stickPosEle = ABS(getRcStickDeflection(FD_PITCH));
-    const float mostDeflectedStickPos = constrain(MAX(stickPosAil, stickPosEle), 0, 500) / 500.0f;
-    const float modeTransitionStickPos = constrain(pidBank()->pid[PID_LEVEL].D, 0, 100) / 100.0f;
+    const float mostDeflectedStickPos = constrain(MAX(stickPosAil, stickPosEle), 0, 500) * 0.05f;
+    const float modeTransitionStickPos = constrain(pidBank()->pid[PID_LEVEL].D, 0, 100) * 0.01f;
 
     float horizonRateMagnitude;
 

@@ -348,7 +348,7 @@ void servoMixer(float dT)
          */
         int16_t inputLimited = (int16_t) rateLimitFilterApply4(&servoSpeedLimitFilter[i], input[from], currentServoMixer[i].speed * 10, dT);
 
-        servo[target] += ((int32_t)inputLimited * currentServoMixer[i].rate) / 100;
+        servo[target] += ((int32_t)inputLimited * currentServoMixer[i].rate) * 0.01f;
     }
 
     for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
@@ -531,8 +531,8 @@ void processContinuousServoAutotrim(const float dT)
                             const uint8_t source = currentServoMixer[i].inputSource;
                             if (source == axis) {
                                 // Convert axis I-term to servo PWM and add to midpoint
-                                const float mixerRate = currentServoMixer[i].rate / 100.0f;
-                                const float servoRate = servoParams(target)->rate / 100.0f;
+                                const float mixerRate = currentServoMixer[i].rate * 0.01f;
+                                const float servoRate = servoParams(target)->rate * 0.01f;
                                 servoParamsMutable(target)->middle += ItermUpdate * mixerRate * servoRate;
                                 servoParamsMutable(target)->middle = constrain(servoParamsMutable(target)->middle, SERVO_AUTOTRIM_CENTER_MIN, SERVO_AUTOTRIM_CENTER_MAX);
                                 }

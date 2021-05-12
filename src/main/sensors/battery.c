@@ -536,7 +536,7 @@ void currentMeterUpdate(timeUs_t timeDelta)
 void powerMeterUpdate(timeUs_t timeDelta)
 {
     static int64_t mWhDrawnRaw = 0;
-    power = (int32_t)amperage * vbat / 100; // power unit is cW (0.01W resolution)
+    power = (int32_t)amperage * vbat * 0.01f; // power unit is cW (0.01W resolution)
     int32_t heatLossesCompensatedPower_mW = (int32_t)amperage * vbat / 10 + sq((int64_t)amperage) * powerSupplyImpedance / 10000;
 
     // Work around int64 math compiler bug, don't change it unless the bug has been fixed !
