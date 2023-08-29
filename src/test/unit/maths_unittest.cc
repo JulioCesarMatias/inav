@@ -131,8 +131,8 @@ TEST(MathsUnittest, TestRotateVectorWithNoAngle)
     fpVector3_t vector = { 1.0f, 0.0f, 0.0f};
     fp_angles_t euler_angles = {.raw={0.0f, 0.0f, 0.0f}};
 
-    fpMat3_t rmat;
-    rotationMatrixFromAngles(&rmat, &euler_angles);
+    fpMatrix3_t rmat;
+    rotationMatrixFromEulerAngles(&rmat, &euler_angles);
     rotationMatrixRotateVector(&vector, &vector, &rmat);
 
     fpVector3_t expected_result = { 1.0f, 0.0f, 0.0f};
@@ -145,8 +145,8 @@ TEST(MathsUnittest, TestRotateVectorAroundAxis)
     fpVector3_t vector = { 1.0f, 0.0f, 0.0f};
     fp_angles_t euler_angles = {.raw={90.0f, 0.0f, 0.0f}};
 
-    fpMat3_t rmat;
-    rotationMatrixFromAngles(&rmat, &euler_angles);
+    fpMatrix3_t rmat;
+    rotationMatrixFromEulerAngles(&rmat, &euler_angles);
     rotationMatrixRotateVector(&vector, &vector, &rmat);
 
     fpVector3_t expected_result = { 1.0f, 0.0f, 0.0f};

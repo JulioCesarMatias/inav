@@ -174,8 +174,13 @@ void taskProcessGPS(timeUs_t currentTimeUs)
 #ifdef USE_MAG
 void taskUpdateCompass(timeUs_t currentTimeUs)
 {
-    if (sensors(SENSOR_MAG)) {
-        compassUpdate(currentTimeUs);
+    if (!sensors(SENSOR_MAG)) {
+        return;
+    }
+
+    const uint32_t newDeadline = compassUpdate(currentTimeUs);
+    if (newDeadline != 0) {
+        rescheduleTask(TASK_SELF, newDeadline);
     }
 }
 #endif
@@ -205,7 +210,7 @@ void taskUpdatePitot(timeUs_t currentTimeUs)
 
     pitotUpdate();
 
-    if ( pitotIsHealthy()) {
+    if (pitotIsHealthy()) {
         updatePositionEstimator_PitotTopic(currentTimeUs);
     }
 }
@@ -407,24 +412,28 @@ void fcTasksInit(void)
 }
 
 cfTask_t cfTasks[TASK_COUNT] = {
+
     [TASK_SYSTEM] = {
         .taskName = "SYSTEM",
         .taskFunc = taskSystem,
         .desiredPeriod = TASK_PERIOD_HZ(10),              // run every 100 ms, 10Hz
         .staticPriority = TASK_PRIORITY_HIGH,
     },
+
     [TASK_PID] = {
         .taskName = "PID",
         .taskFunc = taskMainPidLoop,
         .desiredPeriod = TASK_PERIOD_US(1000),
         .staticPriority = TASK_PRIORITY_REALTIME,
     },
+
     [TASK_GYRO] = {
         .taskName = "GYRO",
         .taskFunc = taskGyro,
         .desiredPeriod = TASK_PERIOD_US(TASK_GYRO_LOOPTIME),
         .staticPriority = TASK_PRIORITY_REALTIME,
     },
+
     [TASK_SERIAL] = {
         .taskName = "SERIAL",
         .taskFunc = taskHandleSerial,
@@ -476,7 +485,7 @@ cfTask_t cfTasks[TASK_COUNT] = {
     [TASK_GPS] = {
         .taskName = "GPS",
         .taskFunc = taskProcessGPS,
-        .desiredPeriod = TASK_PERIOD_HZ(50),      // GPS usually don't go raster than 10Hz
+        .desiredPeriod = TASK_PERIOD_HZ(50),      // GPS is updated at 50 Hz
         .staticPriority = TASK_PRIORITY_MEDIUM,
     },
 #endif
@@ -624,6 +633,7 @@ cfTask_t cfTasks[TASK_COUNT] = {
         .staticPriority = TASK_PRIORITY_IDLE,
     },
 #endif
+
 #ifdef USE_PROGRAMMING_FRAMEWORK
     [TASK_PROGRAMMING_FRAMEWORK] = {
         .taskName = "PROGRAMMING",
@@ -632,6 +642,7 @@ cfTask_t cfTasks[TASK_COUNT] = {
         .staticPriority = TASK_PRIORITY_IDLE,
     },
 #endif
+
 #ifdef USE_RPM_FILTER
     [TASK_RPM_FILTER] = {
         .taskName = "RPM",
@@ -640,6 +651,7 @@ cfTask_t cfTasks[TASK_COUNT] = {
         .staticPriority = TASK_PRIORITY_LOW,
     },
 #endif
+
     [TASK_AUX] = {
         .taskName = "AUX",
         .taskFunc = taskUpdateAux,

@@ -76,9 +76,15 @@ PG_DECLARE(compassConfig_t, compassConfig);
 
 bool compassDetect(magDev_t *dev, magSensor_e magHardwareToUse);
 bool compassInit(void);
-void compassUpdate(timeUs_t currentTimeUs);
+timeDelta_t compassUpdate(timeUs_t currentTimeUs);
 bool compassIsReady(void);
 bool compassIsHealthy(void);
 bool compassIsCalibrationComplete(void);
+
+void update_ahrs_new_samples(void);
+void update_compass_new_samples(const float sample[3]);
+void reset_compass_auto_orientation(void);
+bool calculate_compass_auto_orientation(void);
+void calculate_new_offset_compass(float sample[3]);
 
 #endif

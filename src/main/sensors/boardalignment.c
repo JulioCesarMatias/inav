@@ -44,7 +44,7 @@
 #include "boardalignment.h"
 
 static bool standardBoardAlignment = true;     // board orientation correction
-static fpMat3_t boardRotMatrix;
+static fpMatrix3_t boardRotMatrix;
 
 // no template required since defaults are zero
 PG_REGISTER(boardAlignment_t, boardAlignment, PG_BOARD_ALIGNMENT, 0);
@@ -67,7 +67,7 @@ void initBoardAlignment(void)
         rotationAngles.angles.pitch = DECIDEGREES_TO_RADIANS(boardAlignment()->pitchDeciDegrees);
         rotationAngles.angles.yaw   = DECIDEGREES_TO_RADIANS(boardAlignment()->yawDeciDegrees  );
 
-        rotationMatrixFromAngles(&boardRotMatrix, &rotationAngles);
+        rotationMatrixFromEulerAngles(&boardRotMatrix, &rotationAngles);
     }
 }
 

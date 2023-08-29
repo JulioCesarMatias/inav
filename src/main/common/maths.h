@@ -146,6 +146,7 @@ int gcd(int num, int denom);
 int32_t applyDeadband(int32_t value, int32_t deadband);
 int32_t applyDeadbandRescaled(int32_t value, int32_t deadband, int32_t min, int32_t max);
 
+int16_t constrain_int16(int16_t amt, int16_t low, int16_t high);
 int32_t constrain(int32_t amt, int32_t low, int32_t high);
 float constrainf(float amt, float low, float high);
 

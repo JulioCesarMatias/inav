@@ -156,6 +156,16 @@ int32_t applyDeadbandRescaled(int32_t value, int32_t deadband, int32_t min, int3
     return value;
 }
 
+int16_t constrain_int16(int16_t amt, int16_t low, int16_t high)
+{
+    if (amt < low)
+        return low;
+    else if (amt > high)
+        return high;
+    else
+        return amt;
+}
+
 int32_t constrain(int32_t amt, int32_t low, int32_t high)
 {
     if (amt < low)
@@ -222,8 +232,8 @@ float scaleRangef(float x, float srcMin, float srcMax, float destMin, float dest
     return ((a / b) + destMin);
 }
 
-// Build rMat from Tait–Bryan angles (convention X1, Y2, Z3)
-void rotationMatrixFromAngles(fpMat3_t * rmat, const fp_angles_t * angles)
+// Build Rotation Matrix from Tait–Bryan angles (convention X1, Y2, Z3)
+void rotationMatrixFromEulerAngles(fpMatrix3_t * rmat, const fp_angles_t * angles)
 {
     float cosx, sinx, cosy, siny, cosz, sinz;
     float coszcosx, sinzcosx, coszsinx, sinzsinx;
@@ -251,7 +261,7 @@ void rotationMatrixFromAngles(fpMat3_t * rmat, const fp_angles_t * angles)
     rmat->m[2][Z] = cosy * cosx;
 }
 
-void rotationMatrixFromAxisAngle(fpMat3_t * rmat, const fpAxisAngle_t * a)
+void rotationMatrixFromAxisAngle(fpMatrix3_t * rmat, const fpAxisAngle_t * a)
 {
     const float sang = sin_approx(a->angle);
     const float cang = cos_approx(a->angle);
@@ -281,6 +291,17 @@ void rotationMatrixFromAxisAngle(fpMat3_t * rmat, const fpAxisAngle_t * a)
     rmat->m[2][X] = zxC - ys;
     rmat->m[2][Y] = yzC + xs;
     rmat->m[2][Z] = zzC + cang;
+}
+
+fpVector3_t multiply_matrix_by_vector(fpMatrix3_t m, fpVector3_t v)
+{
+  fpVector3_t vRet;
+
+  vRet.x = m.m[0][0] * v.x + m.m[0][1] * v.y + m.m[0][2] * v.z;
+  vRet.y = m.m[1][0] * v.x + m.m[1][1] * v.y + m.m[1][2] * v.z;
+  vRet.z = m.m[2][0] * v.x + m.m[2][1] * v.y + m.m[2][2] * v.z;
+
+  return vRet;
 }
 
 // Quick median filter implementation
