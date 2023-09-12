@@ -2,8 +2,16 @@
     "files.associations": {
         "chrono": "c",
         "cmath": "c",
-        "ranges": "c"
+        "ranges": "c",
+        "__config": "c",
+        "__nullptr": "c",
+        "locale": "c",
+        "string": "c"
     },
     "editor.tabSize": 4,
     "editor.insertSpaces": true,
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.autopep8"
+    },
+    "python.formatting.provider": "none",
 }

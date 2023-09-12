@@ -570,7 +570,8 @@ bool geoConvertGeodeticToLocalOrigin(fpVector3_t * pos, const gpsLocation_t *llh
 // geodetic coordinates using the provided GPS origin. It returns wether
 // the provided origin is valid and the conversion could be performed.
 bool geoConvertLocalToGeodetic(gpsLocation_t *llh, const gpsOrigin_t *origin, const fpVector3_t *pos);
-float geoCalculateMagDeclination(const gpsLocation_t * llh); // degrees units
+void getMagFieldEF(const gpsLocation_t llh, float *intensity_gauss, float *declination_deg, float *inclination_deg);
+float geoCalculateMagDeclination(const gpsLocation_t llh); // degrees units
 // Select absolute or relative altitude based on WP mission flag setting
 geoAltitudeConversionMode_e waypointMissionAltConvMode(geoAltitudeDatumFlag_e datumFlag);
 

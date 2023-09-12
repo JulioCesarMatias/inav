@@ -2,20 +2,39 @@
 
 # Ported from https://github.com/ArduPilot/ardupilot/tree/master/libraries/AP_Declination/generate
 # Run this script with python3!
+# Note that it requires a fortran compiler. Install the Fortran compiler: https://pypi.org/project/igrf/
 # To install the igrf module, use python3 -m pip install --user igrf12
-# Note that it requires a fortran compiler
+# GCC installation takes hours to install, so don't worry if it takes a while for you. See: https://stackoverflow.com/questions/24966404/brew-install-gcc-too-time-consuming
 
 '''
-generate field tables from IGRF12
+generate field tables from IGRF13. Note that this requires python3
 '''
 
-import collections
+import igrf
+import numpy as np
 import datetime
 import pathlib
-import sys
+from rotmat import Vector3, Matrix3
+import math
 
-import igrf12
-import numpy as np
+def write_table(f, name, table):
+    '''write one table'''
+    f.write("static const %s[%u][%u] = {\n" %
+            (name, NUM_LAT, NUM_LON))
+    for i in range(NUM_LAT):
+        f.write("    {")
+        for j in range(NUM_LON):
+            f.write("%.5ff" % table[i][j])
+            if j != NUM_LON-1:
+                f.write(", ")
+        f.write("}")
+        if i != NUM_LAT-1:
+            f.write(", ")
+        f.write("\n")
+    f.write("};\n\n")
+
+
+date = datetime.datetime.now()
 
 SAMPLING_RES = 10
 SAMPLING_MIN_LAT = -90
@@ -23,111 +42,170 @@ SAMPLING_MAX_LAT = 90
 SAMPLING_MIN_LON = -180
 SAMPLING_MAX_LON = 180
 
-# This is used for flash constrained environments. We limit
-# the latitude range to [-60, 60], so the values fit in an int8_t
-SAMPLING_COMPACT_MIN_LAT = -60
-SAMPLING_COMPACT_MAX_LAT = 60
+lats = np.arange(SAMPLING_MIN_LAT, SAMPLING_MAX_LAT+SAMPLING_RES, SAMPLING_RES)
+lons = np.arange(SAMPLING_MIN_LON, SAMPLING_MAX_LON+SAMPLING_RES, SAMPLING_RES)
 
-PREPROCESSOR_SYMBOL = 'NAV_AUTO_MAG_DECLINATION_PRECISE'
+NUM_LAT = lats.size
+NUM_LON = lons.size
 
-Query = collections.namedtuple('Query', ['date', 'res', 'min_lat', 'max_lat', 'min_lon', 'max_lon'])
-Result = collections.namedtuple('Result', ['query', 'lats', 'lons', 'declination', 'inclination', 'intensity'])
+intensity_table = np.empty((NUM_LAT, NUM_LON))
+inclination_table = np.empty((NUM_LAT, NUM_LON))
+declination_table = np.empty((NUM_LAT, NUM_LON))
 
-def write_table(f, name, table, compact):
-    '''write one table'''
+max_error = 0
+max_error_pos = None
+max_error_field = None
 
-    if compact:
-        format_entry = lambda x: '%d' % round(x)
-        table_type = 'int8_t'
-    else:
-        table_type = 'float'
-        format_entry = lambda x: '%.5ff' % x
+def get_igrf(lat, lon):
+    '''return field as [declination_deg, inclination_deg, intensity_gauss]'''
+    mag = igrf.igrf(date, glat=lat, glon=lon, alt_km=0., isv=0, itype=1)
+    intensity = float(mag.total/1e5)
+    inclination = float(mag.incl)
+    declination = float(mag.decl)
+    return [declination, inclination, intensity]
 
-    num_lat = len(table)
-    num_lon = len(table[0])
 
-    f.write("static const %s %s[%u][%u] = {\n" %
-                (table_type, name, num_lat, num_lon))
-    for i in range(num_lat):
-        f.write("    {")
-        for j in range(num_lon):
-            f.write(format_entry(table[i][j]))
-            if j != num_lon - 1:
-                f.write(",")
-        f.write("}")
-        if i != num_lat - 1:
-            f.write(",")
-        f.write("\n")
-    f.write("};\n\n")
+def interpolate_table(table, latitude_deg, longitude_deg):
+    '''interpolate inside a table for a given lat/lon in degrees'''
+    # round down to nearest sampling resolution
+    min_lat = int(math.floor(latitude_deg / SAMPLING_RES) * SAMPLING_RES)
+    min_lon = int(math.floor(longitude_deg / SAMPLING_RES) * SAMPLING_RES)
 
-def declination_tables(query):
-    lats = np.arange(query.min_lat, query.max_lat + query.res, query.res)
-    lons = np.arange(query.min_lon, query.max_lon + query.res, query.res)
+    # find index of nearest low sampling point
+    min_lat_index = int(
+        math.floor(-(SAMPLING_MIN_LAT) + min_lat) / SAMPLING_RES)
+    min_lon_index = int(
+        math.floor(-(SAMPLING_MIN_LON) + min_lon) / SAMPLING_RES)
 
-    num_lat = lats.size
-    num_lon = lons.size
+    # calculate intensity
+    data_sw = table[min_lat_index][min_lon_index]
+    data_se = table[min_lat_index][min_lon_index + 1]
+    data_ne = table[min_lat_index + 1][min_lon_index + 1]
+    data_nw = table[min_lat_index + 1][min_lon_index]
 
-    intensity = np.empty((num_lat, num_lon))
-    inclination = np.empty((num_lat, num_lon))
-    declination = np.empty((num_lat, num_lon))
+    # perform bilinear interpolation on the four grid corners
+    data_min = ((longitude_deg - min_lon) / SAMPLING_RES) * \
+        (data_se - data_sw) + data_sw
+    data_max = ((longitude_deg - min_lon) / SAMPLING_RES) * \
+        (data_ne - data_nw) + data_nw
+
+    value = ((latitude_deg - min_lat) / SAMPLING_RES) * \
+        (data_max - data_min) + data_min
+    return value
+
+
+'''
+calculate magnetic field intensity and orientation, interpolating in tables
+
+returns array [declination_deg, inclination_deg, intensity] or None
+'''
+
+
+def interpolate_field(latitude_deg, longitude_deg):
+    # limit to table bounds
+    if latitude_deg < SAMPLING_MIN_LAT:
+        return None
+    if latitude_deg >= SAMPLING_MAX_LAT:
+        return None
+    if longitude_deg < SAMPLING_MIN_LON:
+        return None
+    if longitude_deg >= SAMPLING_MAX_LON:
+        return None
+
+    intensity_gauss = interpolate_table(
+        intensity_table, latitude_deg, longitude_deg)
+    declination_deg = interpolate_table(
+        declination_table, latitude_deg, longitude_deg)
+    inclination_deg = interpolate_table(
+        inclination_table, latitude_deg, longitude_deg)
+
+    return [declination_deg, inclination_deg, intensity_gauss]
+
+
+def field_to_Vector3(mag):
+    '''return mGauss field from dec, inc and intensity'''
+    R = Matrix3()
+    mag_ef = Vector3(mag[2]*1000.0, 0.0, 0.0)
+    R.from_euler(0.0, -math.radians(mag[1]), math.radians(mag[0]))
+    return R * mag_ef
+
+
+def test_error(lat, lon):
+    '''check for error from lat,lon'''
+    global max_error, max_error_pos, max_error_field
+    mag1 = get_igrf(lat, lon)
+    mag2 = interpolate_field(lat, lon)
+    ef1 = field_to_Vector3(mag1)
+    ef2 = field_to_Vector3(mag2)
+    err = (ef1 - ef2).length()
+    if err > max_error or err > 100:
+        print(lat, lon, err, ef1, ef2)
+        max_error = err
+        max_error_pos = (lat, lon)
+        max_error_field = ef1 - ef2
+
+
+def test_max_error(lat, lon):
+    '''check for maximum error from lat,lon over SAMPLING_RES range'''
+    steps = 3
+    delta = SAMPLING_RES/steps
+    for i in range(steps):
+        for j in range(steps):
+            lat2 = lat + i * delta
+            lon2 = lon + j * delta
+            if lat2 >= SAMPLING_MAX_LAT or lon2 >= SAMPLING_MAX_LON:
+                continue
+            if lat2 <= SAMPLING_MIN_LAT or lon2 <= SAMPLING_MIN_LON:
+                continue
+            test_error(lat2, lon2)
 
     for i, lat in enumerate(lats):
         for j, lon in enumerate(lons):
-            mag = igrf12.igrf(date, glat=lat, glon=lon, alt_km=0., isv=0, itype=1)
-            intensity[i][j] = mag.total / 1e5
-            inclination[i][j] = mag.incl
-            declination[i][j] = mag.decl
-
-    return Result(query=query, lats=lats, lons=lons,
-        declination=declination, inclination=inclination, intensity=intensity)
-
-def generate_constants(f, query):
-    f.write('#define SAMPLING_RES\t\t%.5ff\n' % query.res)
-    f.write('#define SAMPLING_MIN_LON\t%.5ff\n' % query.min_lon)
-    f.write('#define SAMPLING_MAX_LON\t%.5ff\n' % query.max_lon)
-    f.write('#define SAMPLING_MIN_LAT\t%.5ff\n' % query.min_lat)
-    f.write('#define SAMPLING_MAX_LAT\t%.5ff\n' % query.max_lat)
-    f.write('\n')
-
-def generate_tables(f, query, compact):
-    result = declination_tables(query)
-    write_table(f, 'declination_table', result.declination, compact)
-
-    # We're not using these tables for now
-    #if not compact:
-    #    write_table(f, 'inclination_table', result.inclination, False)
-    #    write_table(f, 'intensity_table', result.intensity, False)
-
-def generate_code(f, date):
-
-    compact_query = Query(date=date, res=SAMPLING_RES,
-        min_lat=SAMPLING_COMPACT_MIN_LAT, max_lat=SAMPLING_COMPACT_MAX_LAT,
-        min_lon=SAMPLING_MIN_LON, max_lon=SAMPLING_MAX_LON)
-
-    precise_query = Query(date=date, res=SAMPLING_RES,
-        min_lat=SAMPLING_MIN_LAT, max_lat=SAMPLING_MAX_LAT,
-        min_lon=SAMPLING_MIN_LON, max_lon=SAMPLING_MAX_LON)
-
-    f.write('/* this file is automatically generated by src/utils/declination.py - DO NOT EDIT! */\n\n\n')
-    f.write('/* Updated on %s */\n\n\n' % date)
-    f.write('#include <stdint.h>\n\n')
+            mag = get_igrf(lat, lon)
+            declination_table[i][j] = mag[0]
+            inclination_table[i][j] = mag[1]
+            intensity_table[i][j] = mag[2]
 
 
-    f.write('\n\n#if defined(%s)\n' % PREPROCESSOR_SYMBOL)
-    generate_constants(f, precise_query)
-    generate_tables(f, precise_query, False)
-    # We're not using these tables for now
-    # write_table(f, 'inclination_table', inclination_table)
-    # write_table(f, 'intensity_table', intensity_table)
-    f.write('#else /* !%s */\n' % PREPROCESSOR_SYMBOL)
-    generate_constants(f, compact_query)
-    generate_tables(f, compact_query, True)
-    f.write('#endif\n')
+def generate_code(f):
+    f.write('''// This is an auto-generated file from the IGRF tables. Do not edit
+// To re-generate run src/utils/declination.py
+
+#include <stdint.h>
+
+#define LAT_TABLE_SIZE 19
+#define LON_TABLE_SIZE 37
+            
+''')
+
+    f.write('''#define SAMPLING_RES %u
+#define SAMPLING_MIN_LAT %u
+#define SAMPLING_MAX_LAT %u
+#define SAMPLING_MIN_LON %u
+#define SAMPLING_MAX_LON %u
+
+''' % (SAMPLING_RES,
+           SAMPLING_MIN_LAT,
+           SAMPLING_MAX_LAT,
+           SAMPLING_MIN_LON,
+           SAMPLING_MAX_LON))
+
+    write_table(f, 'declination_table', declination_table)
+    write_table(f, 'inclination_table', inclination_table)
+    write_table(f, 'intensity_table', intensity_table)
+
+    print("Checking for maximum error")
+    for lat in range(-60, 60, 1):
+        for lon in range(-180, 180, 1):
+            test_max_error(lat, lon)
+    print("Generated with max error %.2f %s at (%.2f,%.2f)" % (
+        max_error, max_error_field, max_error_pos[0], max_error_pos[1]))
+
 
 if __name__ == '__main__':
 
-    output = pathlib.PurePath(__file__).parent / '..' / 'main'  / 'navigation' / 'navigation_declination_gen.c'
-    date = datetime.datetime.now()
+    output = pathlib.PurePath(__file__).parent / '..' / \
+        'main' / 'navigation' / 'navigation_declination_gen.c'
 
     with open(output, 'w') as f:
-        generate_code(f, date)
+        generate_code(f)

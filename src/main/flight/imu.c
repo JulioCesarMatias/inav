@@ -75,9 +75,9 @@
 // which results in false gyro drift. See
 // http://gentlenav.googlecode.com/files/fastRotations.pdf
 
-#define SPIN_RATE_LIMIT             20
-#define MAX_ACC_NEARNESS            0.2    // 20% or G error soft-accepted (0.8-1.2G)
-#define IMU_ROTATION_LPF         3       // Hz
+#define SPIN_RATE_LIMIT  20
+#define MAX_ACC_NEARNESS 0.2 // 20% or G error soft-accepted (0.8-1.2G)
+#define IMU_ROTATION_LPF 3   // Hz
 FASTRAM fpVector3_t imuMeasuredAccelBF;
 FASTRAM fpVector3_t imuMeasuredRotationBF;
 //centrifugal force compensated using gps
@@ -97,14 +97,14 @@ STATIC_FASTRAM imuRuntimeConfig_t imuRuntimeConfig;
 STATIC_FASTRAM pt1Filter_t rotRateFilterX;
 STATIC_FASTRAM pt1Filter_t rotRateFilterY;
 STATIC_FASTRAM pt1Filter_t rotRateFilterZ;
-FASTRAM fpVector3_t imuMeasuredRotationBFFiltered = {.v = {0.0f, 0.0f, 0.0f}};
+FASTRAM fpVector3_t imuMeasuredRotationBFFiltered;
 
 STATIC_FASTRAM pt1Filter_t HeadVecEFFilterX;
 STATIC_FASTRAM pt1Filter_t HeadVecEFFilterY;
 STATIC_FASTRAM pt1Filter_t HeadVecEFFilterZ;
-FASTRAM fpVector3_t HeadVecEFFiltered = {.v = {0.0f, 0.0f, 0.0f}};
+FASTRAM fpVector3_t HeadVecEFFiltered;
 
-STATIC_FASTRAM float GPS3DspeedFiltered=0.0f;
+STATIC_FASTRAM float GPS3DspeedFiltered;
 STATIC_FASTRAM pt1Filter_t GPS3DspeedFilter;
 
 FASTRAM bool gpsHeadingInitialized;
@@ -616,10 +616,10 @@ static void imuCalculateGPSacceleration(fpVector3_t *vEstcentrifugalAccelBF, flo
     if (lastGPSHeartbeat != gpsSol.flags.gpsHeartbeat && time_delta_ms > 0)
     {
         // on new gps frame, update accEF and estimate centrifugal accleration
-        fpVector3_t vGPSacc = {.v = {0.0f, 0.0f, 0.0f}};
-        vGPSacc.x = -(currentGPSvel.x - lastGPSvel.x) / (MS2S(time_delta_ms)); // the x axis of accerometer is pointing backward
-        vGPSacc.y = (currentGPSvel.y - lastGPSvel.y) / (MS2S(time_delta_ms));
-        vGPSacc.z = (currentGPSvel.z - lastGPSvel.z) / (MS2S(time_delta_ms));
+        fpVector3_t vGPSacc = {.v = { -(currentGPSvel.x - lastGPSvel.x) / (MS2S(time_delta_ms)), // the x axis of accerometer is pointing backward
+                                       (currentGPSvel.y - lastGPSvel.y) / (MS2S(time_delta_ms)),
+                                       (currentGPSvel.z - lastGPSvel.z) / (MS2S(time_delta_ms)) 
+                                    }};
         // Calculate estimated centrifugal accleration vector in body frame
         quaternionRotateVector(vEstcentrifugalAccelBF, &vGPSacc, &orientation); // EF -> BF
         lastGPSNewDataTime = currenttime;

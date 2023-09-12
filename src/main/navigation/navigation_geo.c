@@ -43,29 +43,24 @@
 
 #include "navigation/navigation_declination_gen.c"
 
-static float get_lookup_table_val(unsigned lat_index, unsigned lon_index)
-{
-    return declination_table[lat_index][lon_index];
-}
-
-float geoCalculateMagDeclination(const gpsLocation_t * llh) // degrees units
+void getMagFieldEF(const gpsLocation_t llh, float *intensity_gauss, float *declination_deg, float *inclination_deg)
 {
     /*
      * If the values exceed valid ranges, return zero as default
      * as we have no way of knowing what the closest real value
      * would be.
      */
-    const float lat = llh->lat / 10000000.0f;
-    const float lon = llh->lon / 10000000.0f;
+    const float lat = llh.lat / 10000000.0f;
+    const float lon = llh.lon / 10000000.0f;
 
-    if (lat < -90.0f || lat > 90.0f ||
-        lon < -180.0f || lon > 180.0f) {
+    if (lat < -90.0f || lat > 90.0f || lon < -180.0f || lon > 180.0f) {
         return 0.0f;
     }
 
     /* round down to nearest sampling resolution */
-    int min_lat = (int)(lat / SAMPLING_RES) * SAMPLING_RES;
-    int min_lon = (int)(lon / SAMPLING_RES) * SAMPLING_RES;
+    float min_lat = floorf(lat / SAMPLING_RES) * SAMPLING_RES;
+    float min_lon = floorf(lon / SAMPLING_RES) * SAMPLING_RES;
+
 
     /* for the rare case of hitting the bounds exactly
      * the rounding logic wouldn't fit, so enforce it.
@@ -89,20 +84,61 @@ float geoCalculateMagDeclination(const gpsLocation_t * llh) // degrees units
     }
 
     /* find index of nearest low sampling point */
-    const unsigned min_lat_index = (-(SAMPLING_MIN_LAT) + min_lat)  / SAMPLING_RES;
-    const unsigned min_lon_index = (-(SAMPLING_MIN_LON) + min_lon) / SAMPLING_RES;
+    const uint32_t min_lat_index = constrain((-(SAMPLING_MIN_LAT) + min_lat) / SAMPLING_RES, 0, LAT_TABLE_SIZE - 2);
+    const uint32_t min_lon_index = constrain((-(SAMPLING_MIN_LON) + min_lon) / SAMPLING_RES, 0, LON_TABLE_SIZE -2);
 
-    const float declination_sw = get_lookup_table_val(min_lat_index, min_lon_index);
-    const float declination_se = get_lookup_table_val(min_lat_index, min_lon_index + 1);
-    const float declination_ne = get_lookup_table_val(min_lat_index + 1, min_lon_index + 1);
-    const float declination_nw = get_lookup_table_val(min_lat_index + 1, min_lon_index);
+    /* calculate intensity */
+
+    float data_sw = intensity_table[min_lat_index][min_lon_index];
+    float data_se = intensity_table[min_lat_index][min_lon_index + 1];
+    float data_ne = intensity_table[min_lat_index + 1][min_lon_index + 1];
+    float data_nw = intensity_table[min_lat_index + 1][min_lon_index];
 
     /* perform bilinear interpolation on the four grid corners */
 
-    const float declination_min = ((lon - min_lon) / SAMPLING_RES) * (declination_se - declination_sw) + declination_sw;
-    const float declination_max = ((lon - min_lon) / SAMPLING_RES) * (declination_ne - declination_nw) + declination_nw;
+    float data_min = ((lon - min_lon) / SAMPLING_RES) * (data_se - data_sw) + data_sw;
+    float data_max = ((lon - min_lon) / SAMPLING_RES) * (data_ne - data_nw) + data_nw;
+    
+    *intensity_gauss = ((lat - min_lat) / SAMPLING_RES) * (data_max - data_min) + data_min;
 
-    return ((lat - min_lat) / SAMPLING_RES) * (declination_max - declination_min) + declination_min;
+    /* calculate declination */
+
+    data_sw = declination_table[min_lat_index][min_lon_index];
+    data_se = declination_table[min_lat_index][min_lon_index + 1];
+    data_ne = declination_table[min_lat_index + 1][min_lon_index + 1];
+    data_nw = declination_table[min_lat_index + 1][min_lon_index];
+
+    /* perform bilinear interpolation on the four grid corners */
+
+    data_min = ((lon - min_lon) / SAMPLING_RES) * (data_se - data_sw) + data_sw;
+    data_max = ((lon - min_lon) / SAMPLING_RES) * (data_ne - data_nw) + data_nw;
+
+    *declination_deg = ((lat - min_lat) / SAMPLING_RES) * (data_max - data_min) + data_min;
+
+    /* calculate inclination */
+
+    data_sw = inclination_table[min_lat_index][min_lon_index];
+    data_se = inclination_table[min_lat_index][min_lon_index + 1];
+    data_ne = inclination_table[min_lat_index + 1][min_lon_index + 1];
+    data_nw = inclination_table[min_lat_index + 1][min_lon_index];
+
+    /* perform bilinear interpolation on the four grid corners */
+
+    data_min = ((lon - min_lon) / SAMPLING_RES) * (data_se - data_sw) + data_sw;
+    data_max = ((lon - min_lon) / SAMPLING_RES) * (data_ne - data_nw) + data_nw;
+
+    *inclination_deg = ((lat - min_lat) / SAMPLING_RES) * (data_max - data_min) + data_min;
+}
+
+float geoCalculateMagDeclination(const gpsLocation_t llh) // degrees units
+{
+    float declination_deg = 0.0f;
+    float inclination_deg = 0.0f;
+    float intensity_gauss = 0.0f;
+
+    getMagFieldEF(llh, &intensity_gauss, &declination_deg, &inclination_deg);
+
+    return declination_deg;
 }
 
 void geoSetOrigin(gpsOrigin_t *origin, const gpsLocation_t *llh, geoOriginResetMode_e resetMode)

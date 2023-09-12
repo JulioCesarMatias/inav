@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
 #include <math.h>
 
 #include "axis.h"
@@ -112,6 +113,18 @@ int gcd(int num, int denom)
     }
 
     return gcd(denom, num % denom);
+}
+
+/*
+  simple 16 bit random number generator
+ */
+uint16_t get_random16(void)
+{
+    static uint32_t m_z = 1234;
+    static uint32_t m_w = 76542;
+    m_z = 36969 * (m_z & 0xFFFFu) + (m_z >> 16);
+    m_w = 18000 * (m_w & 0xFFFFu) + (m_w >> 16);
+    return ((m_z << 16) + m_w) & 0xFFFF;
 }
 
 int32_t wrap_18000(int32_t angle)
@@ -293,7 +306,7 @@ void rotationMatrixFromAxisAngle(fpMatrix3_t * rmat, const fpAxisAngle_t * a)
     rmat->m[2][Z] = zzC + cang;
 }
 
-fpVector3_t multiply_matrix_by_vector(fpMatrix3_t m, fpVector3_t v)
+fpVector3_t multiplyMatrixByVector(fpMatrix3_t m, fpVector3_t v)
 {
   fpVector3_t vRet;
 
@@ -611,5 +624,345 @@ void arm_mult_f32(
         pDst[i] = pSrcA[i] * pSrcB[i];
     }
 }
-
 #endif
+
+/*
+ *    fast matrix inverse code only for 4x4 square matrix copied from
+ *    gluInvertMatrix implementation in opengl for 4x4 matrices.
+ *
+ *    @param     m,           input 4x4 matrix
+ *    @param     invOut,      Output inverted 4x4 matrix
+ *    @returns                false = matrix is Singular, true = matrix inversion successful
+ */
+bool matrix_inverse4x4(const float m[], float invOut[])
+{
+    float inv[16], det;
+    uint16_t i;
+
+    inv[0] = m[5]  * m[10] * m[15] -
+    m[5]  * m[11] * m[14] -
+    m[9]  * m[6]  * m[15] +
+    m[9]  * m[7]  * m[14] +
+    m[13] * m[6]  * m[11] -
+    m[13] * m[7]  * m[10];
+
+    inv[4] = -m[4]  * m[10] * m[15] +
+    m[4]  * m[11] * m[14] +
+    m[8]  * m[6]  * m[15] -
+    m[8]  * m[7]  * m[14] -
+    m[12] * m[6]  * m[11] +
+    m[12] * m[7]  * m[10];
+
+    inv[8] = m[4]  * m[9] * m[15] -
+    m[4]  * m[11] * m[13] -
+    m[8]  * m[5] * m[15] +
+    m[8]  * m[7] * m[13] +
+    m[12] * m[5] * m[11] -
+    m[12] * m[7] * m[9];
+
+    inv[12] = -m[4]  * m[9] * m[14] +
+    m[4]  * m[10] * m[13] +
+    m[8]  * m[5] * m[14] -
+    m[8]  * m[6] * m[13] -
+    m[12] * m[5] * m[10] +
+    m[12] * m[6] * m[9];
+
+    inv[1] = -m[1]  * m[10] * m[15] +
+    m[1]  * m[11] * m[14] +
+    m[9]  * m[2] * m[15] -
+    m[9]  * m[3] * m[14] -
+    m[13] * m[2] * m[11] +
+    m[13] * m[3] * m[10];
+
+    inv[5] = m[0]  * m[10] * m[15] -
+    m[0]  * m[11] * m[14] -
+    m[8]  * m[2] * m[15] +
+    m[8]  * m[3] * m[14] +
+    m[12] * m[2] * m[11] -
+    m[12] * m[3] * m[10];
+
+    inv[9] = -m[0]  * m[9] * m[15] +
+    m[0]  * m[11] * m[13] +
+    m[8]  * m[1] * m[15] -
+    m[8]  * m[3] * m[13] -
+    m[12] * m[1] * m[11] +
+    m[12] * m[3] * m[9];
+
+    inv[13] = m[0]  * m[9] * m[14] -
+    m[0]  * m[10] * m[13] -
+    m[8]  * m[1] * m[14] +
+    m[8]  * m[2] * m[13] +
+    m[12] * m[1] * m[10] -
+    m[12] * m[2] * m[9];
+
+    inv[2] = m[1]  * m[6] * m[15] -
+    m[1]  * m[7] * m[14] -
+    m[5]  * m[2] * m[15] +
+    m[5]  * m[3] * m[14] +
+    m[13] * m[2] * m[7] -
+    m[13] * m[3] * m[6];
+
+    inv[6] = -m[0]  * m[6] * m[15] +
+    m[0]  * m[7] * m[14] +
+    m[4]  * m[2] * m[15] -
+    m[4]  * m[3] * m[14] -
+    m[12] * m[2] * m[7] +
+    m[12] * m[3] * m[6];
+
+    inv[10] = m[0]  * m[5] * m[15] -
+    m[0]  * m[7] * m[13] -
+    m[4]  * m[1] * m[15] +
+    m[4]  * m[3] * m[13] +
+    m[12] * m[1] * m[7] -
+    m[12] * m[3] * m[5];
+
+    inv[14] = -m[0]  * m[5] * m[14] +
+    m[0]  * m[6] * m[13] +
+    m[4]  * m[1] * m[14] -
+    m[4]  * m[2] * m[13] -
+    m[12] * m[1] * m[6] +
+    m[12] * m[2] * m[5];
+
+    inv[3] = -m[1] * m[6] * m[11] +
+    m[1] * m[7] * m[10] +
+    m[5] * m[2] * m[11] -
+    m[5] * m[3] * m[10] -
+    m[9] * m[2] * m[7] +
+    m[9] * m[3] * m[6];
+
+    inv[7] = m[0] * m[6] * m[11] -
+    m[0] * m[7] * m[10] -
+    m[4] * m[2] * m[11] +
+    m[4] * m[3] * m[10] +
+    m[8] * m[2] * m[7] -
+    m[8] * m[3] * m[6];
+
+    inv[11] = -m[0] * m[5] * m[11] +
+    m[0] * m[7] * m[9] +
+    m[4] * m[1] * m[11] -
+    m[4] * m[3] * m[9] -
+    m[8] * m[1] * m[7] +
+    m[8] * m[3] * m[5];
+
+    inv[15] = m[0] * m[5] * m[10] -
+    m[0] * m[6] * m[9] -
+    m[4] * m[1] * m[10] +
+    m[4] * m[2] * m[9] +
+    m[8] * m[1] * m[6] -
+    m[8] * m[2] * m[5];
+
+    det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+
+    if (det == 0.0f || isinf(det)) {
+        return false;
+    }
+
+    det = 1.0f / det;
+
+    for (i = 0; i < 16; i++) {
+        invOut[i] = inv[i] * det;
+    }
+
+    return true;
+}
+
+/*
+ *    Does matrix multiplication of two regular/square matrices
+ *
+ *    @param     A,           Matrix A
+ *    @param     B,           Matrix B
+ *    @param     n,           dimemsion of square matrices
+ *    @returns                multiplied matrix i.e. A*B
+ */
+static float *matrix_multiply(const float *A, const float *B, uint16_t n)
+{
+    float *ret[n * n];
+    memset(ret, 0.0f, n * n * sizeof(float));
+
+    for (uint16_t i = 0; i < n; i++) {
+        for (uint16_t j = 0; j < n; j++) {
+            for (uint16_t k = 0;k < n; k++) {
+                *ret[i * n + j] += A[i * n + k] * B[k * n + j];
+            }
+        }
+    }
+
+    return *ret;
+}
+
+static inline void swap(float *a, float *b)
+{
+    float c;
+    c = *a;
+    *a = *b;
+    *b = c;
+}
+
+/*
+ *    calculates pivot matrix such that all the larger elements in the row are on diagonal
+ *
+ *    @param     A,           input matrix matrix
+ *    @param     pivot
+ *    @param     n,           dimenstion of square matrix
+ *    @returns                false = matrix is Singular or non positive definite, true = matrix inversion successful
+ */
+static void matrix_pivot(const float *A, float *pivot, uint16_t n)
+{
+    /*for(uint16_t i = 0; i < n; i++){
+        for(uint16_t j = 0;j < n; j++) {
+            pivot[i * n + j] = static_cast<float>(i == j);
+        }
+    }*/
+
+    for(uint16_t i = 0; i < n; i++) {
+        uint16_t max_j = i;
+        for(uint16_t j = i; j < n;j++){
+            if(fabsf(A[j * n + i]) > fabsf(A[max_j * n + i])) {
+                max_j = j;
+            }
+        }
+
+        if(max_j != i) {
+            for(uint16_t k = 0; k < n; k++) {
+                swap(&pivot[i * n + k], &pivot[max_j * n + k]);
+            }
+        }
+    }
+}
+
+/*
+ *    Decomposes square matrix into Lower and Upper triangular matrices such that
+ *    A*P = L*U, where P is the pivot matrix
+ *    ref: http://rosettacode.org/wiki/LU_decomposition
+ *    @param     U,           upper triangular matrix
+ *    @param     out,         Output inverted upper triangular matrix
+ *    @param     n,           dimension of matrix
+ */
+static void matrix_LU_decompose(const float *A, float *L, float *U, float *P, uint16_t n)
+{
+    memset(L, 0, n * n * sizeof(float));
+    memset(U, 0, n * n * sizeof(float));
+    memset(P, 0, n * n * sizeof(float));
+
+    matrix_pivot(A, P, n);
+
+    float *APrime = matrix_multiply(P, A, n);
+
+    for (uint16_t i = 0; i < n; i++) {
+        L[i * n + i] = 1;
+    }
+
+    for(uint16_t i = 0; i < n; i++) {
+        for(uint16_t j = 0; j < n; j++) {
+            if(j <= i) {    
+                U[j * n + i] = APrime[j * n + i];
+                for(uint16_t k = 0; k < j; k++) {
+                    U[j * n + i] -= L[j * n + k] * U[k * n + i]; 
+                }
+            }
+            if(j >= i) {
+                L[j * n + i] = APrime[j * n + i];
+                for(uint16_t k = 0; k < i; k++) {
+                    L[j*n + i] -= L[j * n + k] * U[k*n + i]; 
+                }
+                L[j * n + i] /= U[i * n + i];
+            }
+        }
+    }
+    free(APrime);
+}
+
+/*
+ *    calculates matrix inverse of Upper trangular matrix using backward substitution
+ *
+ *    @param     U,           upper triangular matrix
+ *    @param     out,         Output inverted upper triangular matrix
+ *    @param     n,           dimension of matrix
+ */
+static void matrix_back_sub(const float *U, float *out, uint16_t n)
+{
+    // Backward Substitution solve UY = I
+    for(int i = n-1; i >= 0; i--) {
+        out[i * n + i] = 1/U[i * n + i];
+        for (int j = i - 1; j >= 0; j--) {
+            for (int k = i; k > j; k--) {
+                out[j * n + i] -= U[j * n + k] * out[k * n + i];
+            }
+            out[j * n + i] /= U[j * n + j];
+        }
+    }
+}
+
+/*
+ *    calculates matrix inverse of Lower trangular matrix using forward substitution
+ *
+ *    @param     L,           lower triangular matrix
+ *    @param     out,         Output inverted lower triangular matrix
+ *    @param     n,           dimension of matrix
+ */
+static void matrix_forward_sub(const float *L, float *out, uint16_t n)
+{
+    // Forward substitution solve LY = I
+    for(int i = 0; i < n; i++) {
+        out[i * n + i] = 1/L[i * n + i];
+        for (int j = i+1; j < n; j++) {
+            for (int k = i; k < j; k++) {
+                out[j * n + i] -= L[j * n + k] * out[k * n + i];
+            }
+            out[j * n + i] /= L[j * n + j];
+        }
+    }
+}
+
+/*
+ *    matrix inverse code for any square matrix using LU decomposition
+ *    inv = inv(U)*inv(L)*P, where L and U are triagular matrices and P the pivot matrix
+ *    ref: http://www.cl.cam.ac.uk/teaching/1314/NumMethods/supporting/mcmaster-kiruba-ludecomp.pdf
+ *    @param     m,           input 4x4 matrix
+ *    @param     inv,         Output inverted 4x4 matrix
+ *    @param     n,           dimension of square matrix
+ *    @returns                false = matrix is Singular, true = matrix inversion successful
+ */
+bool matrix_inverseN(const float *A, float *inv, uint16_t n)
+{
+    float L[n * n], U[n * n], P[n * n];
+    bool ret = true;
+
+    matrix_LU_decompose(A, L, U, P, n);
+
+    float L_inv[n * n];
+    float U_inv[n * n];
+
+    memset(L_inv, 0, n * n * sizeof(float));
+    matrix_forward_sub(L, L_inv, n);
+
+    memset(U_inv, 0, n * n * sizeof(float));
+    matrix_back_sub(U, U_inv, n);
+
+    // decomposed matrices no longer required
+    free(L);
+    free(U);
+
+    float *inv_unpivoted = matrix_multiply(U_inv, L_inv, n);
+    float *inv_pivoted = matrix_multiply(inv_unpivoted, P, n);
+
+    //check sanity of results
+    for(uint16_t i = 0; i < n; i++) {
+        for(uint16_t j = 0; j < n; j++) {
+            if(isnan(inv_pivoted[i * n + j]) || isinf(inv_pivoted[i * n + j])) {
+                ret = false;
+            }
+        }
+    }
+
+    memcpy(inv, inv_pivoted,n * n * sizeof(float));
+
+    //free memory
+    free(inv_pivoted);
+    free(inv_unpivoted);
+    free(P);
+    free(U_inv);
+    free(L_inv);
+
+    return ret;
+}

@@ -133,7 +133,7 @@ TEST(MathsUnittest, TestRotateVectorWithNoAngle)
 
     fpMatrix3_t rmat;
     rotationMatrixFromEulerAngles(&rmat, &euler_angles);
-    rotationMatrixRotateVector(&vector, &vector, &rmat);
+    multiplicationTransposeMatrixByVector(rmat, &vector);
 
     fpVector3_t expected_result = { 1.0f, 0.0f, 0.0f};
     expectVectorsAreEqual(&vector, &expected_result);
@@ -147,7 +147,7 @@ TEST(MathsUnittest, TestRotateVectorAroundAxis)
 
     fpMatrix3_t rmat;
     rotationMatrixFromEulerAngles(&rmat, &euler_angles);
-    rotationMatrixRotateVector(&vector, &vector, &rmat);
+    multiplicationTransposeMatrixByVector(rmat, &vector);
 
     fpVector3_t expected_result = { 1.0f, 0.0f, 0.0f};
     expectVectorsAreEqual(&vector, &expected_result);

@@ -92,7 +92,7 @@ void applyBoardAlignment(float *vec)
     }
 
     fpVector3_t fpVec = { .v = { vec[X], vec[Y], vec[Z] } };
-    rotationMatrixRotateVector(&fpVec, &fpVec, &boardRotMatrix);
+    multiplicationTransposeMatrixByVector(boardRotMatrix, &fpVec);
 
     vec[X] = lrintf(fpVec.x);
     vec[Y] = lrintf(fpVec.y);

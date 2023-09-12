@@ -61,12 +61,14 @@ typedef struct compassConfig_s {
                                             // For example, -6deg 37min, = -637 Japan, format is [sign]dddmm (degreesminutes) default is zero.
     sensor_align_e mag_align;               // on-board mag alignment. Ignored if externally aligned via *DeciDegrees.
     uint8_t mag_hardware;                   // Which mag hardware to use on boards with more than one device
-    flightDynamicsTrims_t magZero;
-    int16_t magGain[XYZ_AXIS_COUNT];
+    uint8_t mag_auto_rotate;
+    float offSet[XYZ_AXIS_COUNT];
+    float scaleFactor;
+    float diagonals[XYZ_AXIS_COUNT];
+    float offDiagonals[XYZ_AXIS_COUNT];
 #ifdef USE_DUAL_MAG
     uint8_t mag_to_use;
 #endif
-    uint8_t magCalibrationTimeLimit;        // Time for compass calibration (seconds)
     int16_t rollDeciDegrees;                // Alignment for external mag on the roll (X) axis (0.1deg)
     int16_t pitchDeciDegrees;               // Alignment for external mag on the pitch (Y) axis (0.1deg)
     int16_t yawDeciDegrees;                 // Alignment for external mag on the yaw (Z) axis (0.1deg)
@@ -80,11 +82,5 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs);
 bool compassIsReady(void);
 bool compassIsHealthy(void);
 bool compassIsCalibrationComplete(void);
-
-void update_ahrs_new_samples(void);
-void update_compass_new_samples(const float sample[3]);
-void reset_compass_auto_orientation(void);
-bool calculate_compass_auto_orientation(void);
-void calculate_new_offset_compass(float sample[3]);
 
 #endif

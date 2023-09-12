@@ -21,6 +21,8 @@
 #include <math.h>
 
 #include "common/maths.h"
+#include "drivers/sensor.h"
+#include "sensors/boardalignment.h"
 
 typedef union {
     float v[3];
@@ -40,7 +42,7 @@ typedef struct {
 
 void rotationMatrixFromEulerAngles(fpMatrix3_t * rmat, const fp_angles_t * angles);
 void rotationMatrixFromAxisAngle(fpMatrix3_t * rmat, const fpAxisAngle_t * a);
-fpVector3_t multiply_matrix_by_vector(fpMatrix3_t m, fpVector3_t v);
+fpVector3_t multiplyMatrixByVector(fpMatrix3_t m, fpVector3_t v);
 
 static inline void vectorZero(fpVector3_t * v)
 {
@@ -49,16 +51,13 @@ static inline void vectorZero(fpVector3_t * v)
     v->z = 0.0f;
 }
 
-static inline fpVector3_t * rotationMatrixRotateVector(fpVector3_t * result, const fpVector3_t * a, const fpMatrix3_t * rmat)
+static inline void multiplicationTransposeMatrixByVector(const fpMatrix3_t mat, fpVector3_t *vec)
 {
-    fpVector3_t r;
+    const fpVector3_t v = {.v = {vec->x, vec->y, vec->z}};
 
-    r.x = rmat->m[0][0] * a->x + rmat->m[1][0] * a->y + rmat->m[2][0] * a->z;
-    r.y = rmat->m[0][1] * a->x + rmat->m[1][1] * a->y + rmat->m[2][1] * a->z;
-    r.z = rmat->m[0][2] * a->x + rmat->m[1][2] * a->y + rmat->m[2][2] * a->z;
-
-    *result = r;
-    return result;
+    vec->x = mat.m[0][0] * v.x + mat.m[1][0] * v.y + mat.m[2][0] * v.z;
+    vec->y = mat.m[0][1] * v.x + mat.m[1][1] * v.y + mat.m[2][1] * v.z;
+    vec->z = mat.m[0][2] * v.x + mat.m[1][2] * v.y + mat.m[2][2] * v.z;
 }
 
 static inline float vectorNormSquared(const fpVector3_t * v)
@@ -116,4 +115,40 @@ static inline fpVector3_t * vectorScale(fpVector3_t * result, const fpVector3_t 
 
     *result = ab;
     return result;
+}
+
+static inline void vectorRotate(fpVector3_t *vec, const sensor_align_e rotation)
+{
+    float vecCopy[3] = {vec->x, vec->y, vec->z};
+    applySensorAlignment(vecCopy, vecCopy, rotation);
+    vec->x = vecCopy[0];
+    vec->y = vecCopy[1];
+    vec->z = vecCopy[2];
+}
+
+static inline void vectorRotateInverse(fpVector3_t *vec, const sensor_align_e rotation)
+{
+    fpVector3_t x_vec = {.v = {1.0f, 0.0f, 0.0f}};
+    fpVector3_t y_vec = {.v = {0.0f, 1.0f, 0.0f}};
+    fpVector3_t z_vec = {.v = {0.0f, 0.0f, 1.0f}};
+
+    vectorRotate(&x_vec, rotation);
+    vectorRotate(&y_vec, rotation);
+    vectorRotate(&z_vec, rotation);
+
+    fpMatrix3_t vecToMatrix;
+
+    vecToMatrix.m[0][0] = x_vec.x;
+    vecToMatrix.m[0][1] = x_vec.y;
+    vecToMatrix.m[0][2] = x_vec.z;
+
+    vecToMatrix.m[1][0] = y_vec.x;
+    vecToMatrix.m[1][1] = y_vec.y;
+    vecToMatrix.m[1][2] = y_vec.z;
+
+    vecToMatrix.m[2][0] = z_vec.x;
+    vecToMatrix.m[2][1] = z_vec.y;
+    vecToMatrix.m[2][2] = z_vec.z;
+
+    multiplicationTransposeMatrixByVector(vecToMatrix, vec);
 }

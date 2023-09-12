@@ -1330,9 +1330,9 @@ static bool mspFcProcessOutCommand(uint16_t cmdMSP, sbuf_t *dst, mspPostProcessF
         sbufWriteU16(dst, accelerometerConfig()->accGain.raw[Z]);
 
     #ifdef USE_MAG
-        sbufWriteU16(dst, compassConfig()->magZero.raw[X]);
-        sbufWriteU16(dst, compassConfig()->magZero.raw[Y]);
-        sbufWriteU16(dst, compassConfig()->magZero.raw[Z]);
+        sbufWriteU16(dst, compassConfig()->offSet[X]);
+        sbufWriteU16(dst, compassConfig()->offSet[Y]);
+        sbufWriteU16(dst, compassConfig()->offSet[Z]);
     #else
         sbufWriteU16(dst, 0);
         sbufWriteU16(dst, 0);
@@ -1346,9 +1346,9 @@ static bool mspFcProcessOutCommand(uint16_t cmdMSP, sbuf_t *dst, mspPostProcessF
     #endif
 
     #ifdef USE_MAG
-        sbufWriteU16(dst, compassConfig()->magGain[X]);
-        sbufWriteU16(dst, compassConfig()->magGain[Y]);
-        sbufWriteU16(dst, compassConfig()->magGain[Z]);
+        sbufWriteU16(dst, 0);
+        sbufWriteU16(dst, 0);
+        sbufWriteU16(dst, 0);
     #else
         sbufWriteU16(dst, 0);
         sbufWriteU16(dst, 0);
@@ -2304,9 +2304,9 @@ static mspResult_e mspFcProcessInCommand(uint16_t cmdMSP, sbuf_t *src)
             accelerometerConfigMutable()->accGain.raw[Z] = sbufReadU16(src);
 
 #ifdef USE_MAG
-            compassConfigMutable()->magZero.raw[X] = sbufReadU16(src);
-            compassConfigMutable()->magZero.raw[Y] = sbufReadU16(src);
-            compassConfigMutable()->magZero.raw[Z] = sbufReadU16(src);
+            compassConfigMutable()->offSet[X] = sbufReadU16(src);
+            compassConfigMutable()->offSet[Y] = sbufReadU16(src);
+            compassConfigMutable()->offSet[Z] = sbufReadU16(src);
 #else
             sbufReadU16(src);
             sbufReadU16(src);
@@ -2319,9 +2319,9 @@ static mspResult_e mspFcProcessInCommand(uint16_t cmdMSP, sbuf_t *src)
 #endif
 #ifdef USE_MAG
             if (dataSize >= 22) {
-                compassConfigMutable()->magGain[X] = sbufReadU16(src);
-                compassConfigMutable()->magGain[Y] = sbufReadU16(src);
-                compassConfigMutable()->magGain[Z] = sbufReadU16(src);
+                sbufReadU16(src);
+                sbufReadU16(src);
+                sbufReadU16(src);
             }
 #else
             if (dataSize >= 22) {

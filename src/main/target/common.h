@@ -113,8 +113,6 @@
 
 #define NAV_NON_VOLATILE_WAYPOINT_CLI
 
-#define NAV_AUTO_MAG_DECLINATION_PRECISE
-
 #define USE_D_BOOST
 #define USE_ANTIGRAVITY
 
@@ -184,6 +182,7 @@
 
 //Designed to free space of F722 and F411 MCUs
 #if (MCU_FLASH_SIZE > 512)
+
 #define USE_VTX_FFPV
 #define USE_SERIALRX_SUMD
 #define USE_TELEMETRY_HOTT

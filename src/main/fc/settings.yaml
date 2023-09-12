@@ -490,53 +490,64 @@ groups:
         description: "Selection of mag hardware. See Wiki Sensor auto detect and hardware failure detection for more info"
         default_value: "AUTO"
         table: mag_hardware
+      - name: mag_rotate_auto
+        description: "0 = Disabled. 1 = CheckOnly: It just calculates the compass orientation automatically, but it doesn't save it. 2 = CheckAndFix: The external compass will have their orientation automatically corrected."
+        default_value: 2
+        field: mag_auto_rotate
+        min: 0
+        max: 2
       - name: mag_declination
         description: "Current location magnetic declination in format. For example, -6deg 37min = -637 for Japan. Leading zero in ddd not required. Get your local magnetic declination here: http://magnetic-declination.com/ . Not in use if inav_auto_mag_decl is turned on and you acquire valid GPS fix."
         default_value: 0
         min: -18000
         max: 18000
-      - name: magzero_x
+
+      - name: magOffSet_x
         description: "Magnetometer calibration X offset. If its 0 none offset has been applied and calibration is failed."
-        default_value: :zero
-        field: magZero.raw[X]
-        min: INT16_MIN
-        max: INT16_MAX
-      - name: magzero_y
+        default_value: 0.0
+        field: offSet[X]
+        min: -10000
+        max: 100000
+      - name: magOffSet_y
         description: "Magnetometer calibration Y offset. If its 0 none offset has been applied and calibration is failed."
-        default_value: :zero
-        field: magZero.raw[Y]
-        min: INT16_MIN
-        max: INT16_MAX
-      - name: magzero_z
+        default_value: 0.0
+        field: offSet[Y]
+        min: -10000
+        max: 100000
+      - name: magOffSet_z
         description: "Magnetometer calibration Z offset. If its 0 none offset has been applied and calibration is failed."
-        default_value: :zero
-        field: magZero.raw[Z]
-        min: INT16_MIN
-        max: INT16_MAX
-      - name: maggain_x
-        description: "Magnetometer calibration X gain. If 1024, no calibration or calibration failed"
-        default_value: 1024
-        field: magGain[X]
-        min: INT16_MIN
-        max: INT16_MAX
-      - name: maggain_y
-        description: "Magnetometer calibration Y gain. If 1024, no calibration or calibration failed"
-        default_value: 1024
-        field: magGain[Y]
-        min: INT16_MIN
-        max: INT16_MAX
-      - name: maggain_z
-        description: "Magnetometer calibration Z gain. If 1024, no calibration or calibration failed"
-        default_value: 1024
-        field: magGain[Z]
-        min: INT16_MIN
-        max: INT16_MAX
-      - name: mag_calibration_time
-        description: "Adjust how long time the Calibration of mag will last."
-        default_value: 30
-        field: magCalibrationTimeLimit
-        min: 20
-        max: 120
+        default_value: 0.0
+        field: offSet[Z]
+        min: -10000
+        max: 100000
+      - name: scaleFactor
+        min: -10000
+        max: 100000
+        default_value: 0.0
+      - name: diagonals[X]
+        min: -10000
+        max: 100000
+        default_value: 1.0
+      - name: diagonals[Y]
+        min: -10000
+        max: 100000
+        default_value: 1.0
+      - name: diagonals[Z]
+        min: -10000
+        max: 100000
+        default_value: 1.0
+      - name: offDiagonals[X]
+        min: -10000
+        max: 100000
+        default_value: 0.0
+      - name: offDiagonals[Y]
+        min: -10000
+        max: 100000
+        default_value: 0.0
+      - name: offDiagonals[Z]
+        min: -10000
+        max: 100000
+        default_value: 0.0
       - name: mag_to_use
         description: "Allow to chose between built-in and external compass sensor if they are connected to separate buses. Currently only for REVO target"
         condition: USE_DUAL_MAG

@@ -424,6 +424,8 @@ main_sources(COMMON_SRC
     sensors/boardalignment.h
     sensors/compass.c
     sensors/compass.h
+    sensors/compass_calibration.c
+    sensors/compass_calibration.h
     sensors/diagnostics.c
     sensors/diagnostics.h
     sensors/gyro.c

@@ -229,10 +229,7 @@ static pt1Filter_t fwPosControllerCorrectionFilterState;
  */
 void resetFixedWingPositionController(void)
 {
-    virtualDesiredPosition.x = 0;
-    virtualDesiredPosition.y = 0;
-    virtualDesiredPosition.z = 0;
-
+    vectorZero(&virtualDesiredPosition);
     navPidReset(&posControl.pids.fw_nav);
     navPidReset(&posControl.pids.fw_heading);
     posControl.rcAdjustment[ROLL] = 0;

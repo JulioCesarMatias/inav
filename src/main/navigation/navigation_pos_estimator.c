@@ -215,7 +215,7 @@ void onNewGPSData(void)
         if(STATE(GPS_FIX_HOME)){
             static bool magDeclinationSet = false;
             if (positionEstimationConfig()->automatic_mag_declination && !magDeclinationSet) {
-                const float declination = geoCalculateMagDeclination(&newLLH);
+                const float declination = geoCalculateMagDeclination(newLLH);
                 imuSetMagneticDeclination(declination);
                 magDeclinationSet = true;
             }
@@ -403,10 +403,7 @@ static void updateIMUTopic(timeUs_t currentTimeUs)
     posEstimator.imu.lastUpdateTime = currentTimeUs;
 
     if (!isImuReady()) {
-        posEstimator.imu.accelNEU.x = 0.0f;
-        posEstimator.imu.accelNEU.y = 0.0f;
-        posEstimator.imu.accelNEU.z = 0.0f;
-
+        vectorZero(&posEstimator.imu.accelNEU);
         restartGravityCalibration();
     }
     else {
@@ -459,9 +456,7 @@ static void updateIMUTopic(timeUs_t currentTimeUs)
             posEstimator.imu.accelNEU.z -= posEstimator.imu.calibratedGravityCMSS;
         }
         else {
-            posEstimator.imu.accelNEU.x = 0.0f;
-            posEstimator.imu.accelNEU.y = 0.0f;
-            posEstimator.imu.accelNEU.z = 0.0f;
+            vectorZero(&posEstimator.imu.accelNEU);
         }
 
         /* Update blackbox values */

@@ -682,6 +682,36 @@ Defines debug values exposed in debug variables (developer / debugging setting)
 
 ---
 
+### diagonals[X]
+
+_// TODO_
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 1.0 | -10000 | 100000 |
+
+---
+
+### diagonals[Y]
+
+_// TODO_
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 1.0 | -10000 | 100000 |
+
+---
+
+### diagonals[Z]
+
+_// TODO_
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 1.0 | -10000 | 100000 |
+
+---
+
 ### disarm_kill_switch
 
 Disarms the motors independently of throttle value. Setting to OFF reverts to the old behaviour of disarming only when the throttle is low. Only applies when arming and disarming with an AUX channel.
@@ -2092,13 +2122,33 @@ Defines the LTM update rate (use of bandwidth [NORMAL/MEDIUM/SLOW]). See Telemet
 
 ---
 
-### mag_calibration_time
+### magOffSet_x
 
-Adjust how long time the Calibration of mag will last.
+Magnetometer calibration X offset. If its 0 none offset has been applied and calibration is failed.
 
 | Default | Min | Max |
 | --- | --- | --- |
-| 30 | 20 | 120 |
+| 0.0 | -10000 | 100000 |
+
+---
+
+### magOffSet_y
+
+Magnetometer calibration Y offset. If its 0 none offset has been applied and calibration is failed.
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | -10000 | 100000 |
+
+---
+
+### magOffSet_z
+
+Magnetometer calibration Z offset. If its 0 none offset has been applied and calibration is failed.
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | -10000 | 100000 |
 
 ---
 
@@ -2122,6 +2172,16 @@ Selection of mag hardware. See Wiki Sensor auto detect and hardware failure dete
 
 ---
 
+### mag_rotate_auto
+
+0 = Disabled. 1 = CheckOnly: It just calculates the compass orientation automatically, but it doesn't save it. 2 = CheckAndFix: The external compass will have their orientation automatically corrected.
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 2 | 0 | 2 |
+
+---
+
 ### mag_to_use
 
 Allow to chose between built-in and external compass sensor if they are connected to separate buses. Currently only for REVO target
@@ -2129,66 +2189,6 @@ Allow to chose between built-in and external compass sensor if they are connecte
 | Default | Min | Max |
 | --- | --- | --- |
 | 0 | 0 | 1 |
-
----
-
-### maggain_x
-
-Magnetometer calibration X gain. If 1024, no calibration or calibration failed
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 1024 | -32768 | 32767 |
-
----
-
-### maggain_y
-
-Magnetometer calibration Y gain. If 1024, no calibration or calibration failed
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 1024 | -32768 | 32767 |
-
----
-
-### maggain_z
-
-Magnetometer calibration Z gain. If 1024, no calibration or calibration failed
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 1024 | -32768 | 32767 |
-
----
-
-### magzero_x
-
-Magnetometer calibration X offset. If its 0 none offset has been applied and calibration is failed.
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0 | -32768 | 32767 |
-
----
-
-### magzero_y
-
-Magnetometer calibration Y offset. If its 0 none offset has been applied and calibration is failed.
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0 | -32768 | 32767 |
-
----
-
-### magzero_z
-
-Magnetometer calibration Z offset. If its 0 none offset has been applied and calibration is failed.
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0 | -32768 | 32767 |
 
 ---
 
@@ -3832,6 +3832,36 @@ Waypoint radius [cm]. Waypoint would be considered reached if machine is within 
 
 ---
 
+### offDiagonals[X]
+
+_// TODO_
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | -10000 | 100000 |
+
+---
+
+### offDiagonals[Y]
+
+_// TODO_
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | -10000 | 100000 |
+
+---
+
+### offDiagonals[Z]
+
+_// TODO_
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | -10000 | 100000 |
+
+---
+
 ### opflow_hardware
 
 Selection of OPFLOW hardware.
@@ -5229,6 +5259,16 @@ _// TODO_
 | Default | Min | Max |
 | --- | --- | --- |
 | 3000 | 500 | 10000 |
+
+---
+
+### scaleFactor
+
+_// TODO_
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | -10000 | 100000 |
 
 ---
 

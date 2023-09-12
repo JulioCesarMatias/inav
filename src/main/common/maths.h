@@ -33,6 +33,8 @@
 #define M_LN2f      0.69314718055994530942f
 #define M_Ef        2.71828182845904523536f
 
+#define HALF_SQRT_2 0.7071067691f
+
 #define RAD    (M_PIf / 180.0f)
 
 #define DEGREES_TO_CENTIDEGREES(angle) ((angle) * 100)
@@ -143,6 +145,8 @@ bool sensorCalibrationSolveForOffset(sensorCalibrationState_t * state, float res
 bool sensorCalibrationSolveForScale(sensorCalibrationState_t * state, float result[3]);
 
 int gcd(int num, int denom);
+uint16_t get_random16(void);
+
 int32_t applyDeadband(int32_t value, int32_t deadband);
 int32_t applyDeadbandRescaled(int32_t value, int32_t deadband, int32_t min, int32_t max);
 
@@ -209,3 +213,6 @@ void arm_sub_f32(float * pSrcA, float * pSrcB, float * pDst, uint32_t blockSize)
 void arm_scale_f32(float * pSrc, float scale, float * pDst, uint32_t blockSize);
 void arm_mult_f32(float * pSrcA, float * pSrcB, float * pDst, uint32_t blockSize);
 #endif
+
+bool matrix_inverse4x4(const float m[], float invOut[]);
+bool matrix_inverseN(const float *A, float *inv, uint16_t n);
