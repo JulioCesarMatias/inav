@@ -409,8 +409,8 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs)
 #if defined(SITL_BUILD)
     ENABLE_STATE(COMPASS_CALIBRATED);
 #else
-    // Check offSet
-    if (calc_length_pythagorean_3D(compassConfig()->offSet.raw[X], compassConfig()->offSet.raw[Y], compassConfig()->offSet.raw[Z]) == 0.0f)
+    // Check OffSet
+    if (calc_length_pythagorean_3D(compassConfig()->OffSet.x, compassConfig()->OffSet.y, compassConfig()->OffSet.z) == 0.0f)
     {
         DISABLE_STATE(COMPASS_CALIBRATED);
     }
@@ -435,15 +435,16 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs)
 
     if (STATE(CALIBRATE_MAG))
     {
-        compassCalibrationStarted = true;
+        compassConfigMutable()->scaleFactor = 0.0f;
+        compassConfigMutable()->Diagonals.x = 1.0f;
+        compassConfigMutable()->Diagonals.y = 1.0f;
+        compassConfigMutable()->Diagonals.z = 1.0f;
+        vectorZero(&compassConfigMutable()->OffSet);
+        vectorZero(&compassConfigMutable()->OffDiagonals);
 
-        for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++)
-        {
-            compassConfigMutable()->offSet[axis] = 0.0f;
-            compassConfigMutable()->scaleFactor = 0.0f;
-            compassConfigMutable()->diagonals[axis] = 1.0f;
-            compassConfigMutable()->offDiagonals[axis] = 0.0f;
-        }
+        compassCalibrationStart(COMPASS_CALIBRATION_INIT_DELAY, COMPASS_OFFSETS_MAX_DEFAULT, COMPASS_CALIBRATION_FITNESS_DEFAULT);
+
+        compassCalibrationStarted = true;
 
         beeper(BEEPER_ACTION_SUCCESS);
         DISABLE_STATE(CALIBRATE_MAG);
@@ -491,24 +492,23 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs)
             compassCalibrationSetOrientation(rotation, mag.dev.magAlign.useExternal, compassConfig()->mag_auto_rotate == 2);
         }
 
-        compassCalibrationStart(COMPASS_CALIBRATION_INIT_DELAY, COMPASS_OFFSETS_MAX_DEFAULT, COMPASS_CALIBRATION_FITNESS_DEFAULT);
-        compassCalibrationUpdate();
+        compassCalibrationUpdate(currentTimeUs);
 
         const Report cal_report = getCompassCalibrationReport();
 
         if (cal_report.status == COMPASS_CAL_SUCCESS)
         {
-            compassConfigMutable()->offSet[X] = cal_report.ofs.x;
-            compassConfigMutable()->offSet[Y] = cal_report.ofs.y;
-            compassConfigMutable()->offSet[Z] = cal_report.ofs.z;
+            compassConfigMutable()->OffSet.x = cal_report.ofs.x;
+            compassConfigMutable()->OffSet.y = cal_report.ofs.y;
+            compassConfigMutable()->OffSet.z = cal_report.ofs.z;
 
-            compassConfigMutable()->diagonals[X] = cal_report.diag.x;
-            compassConfigMutable()->diagonals[Y] = cal_report.diag.y;
-            compassConfigMutable()->diagonals[Z] = cal_report.diag.z;
+            compassConfigMutable()->Diagonals.x = cal_report.diag.x;
+            compassConfigMutable()->Diagonals.y = cal_report.diag.y;
+            compassConfigMutable()->Diagonals.z = cal_report.diag.z;
 
-            compassConfigMutable()->offDiagonals[X] = cal_report.offdiag.x;
-            compassConfigMutable()->offDiagonals[Y] = cal_report.offdiag.y;
-            compassConfigMutable()->offDiagonals[Z] = cal_report.offdiag.z;
+            compassConfigMutable()->OffDiagonals.x = cal_report.offdiag.x;
+            compassConfigMutable()->OffDiagonals.y = cal_report.offdiag.y;
+            compassConfigMutable()->OffDiagonals.z = cal_report.offdiag.z;
 
             compassConfigMutable()->scaleFactor = cal_report.scale_factor;
 
@@ -517,7 +517,7 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs)
                 compassConfigMutable()->mag_align = cal_report.orientation;
             }
 
-            if (!is_calibrating())
+            if (!compassIsCalibrating())
             {
                 saveConfigAndNotify();
                 compassCalibrationStarted = false;
@@ -525,11 +525,13 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs)
         }
     }
 
-    fpVector3_t magCorrectField = {.v = {mag.magADC[X], mag.magADC[Y], mag.magADC[Z]}};
+    const float magScaleFactor = compassConfig()->scaleFactor;
 
-    const fpVector3_t offsets = {.v = {compassConfig()->offSet[X], compassConfig()->offSet[Y], compassConfig()->offSet[Z]}};
-    const fpVector3_t diagonals = {.v = {compassConfig()->diagonals[X], compassConfig()->diagonals[Y], compassConfig()->diagonals[Z]}};
-    const fpVector3_t offdiagonals = {.v = {compassConfig()->offDiagonals[X], compassConfig()->offDiagonals[Y], compassConfig()->offDiagonals[Z]}};
+    const fpVector3_t offsets = {.v = {compassConfig()->OffSet.x, compassConfig()->OffSet.y, compassConfig()->OffSet.z}};
+    const fpVector3_t diagonals = {.v = {compassConfig()->Diagonals.x, compassConfig()->Diagonals.y, compassConfig()->Diagonals.z}};
+    const fpVector3_t offdiagonals = {.v = {compassConfig()->OffDiagonals.x, compassConfig()->OffDiagonals.y, compassConfig()->OffDiagonals.z}};
+
+    fpVector3_t magCorrectField = {.v = {mag.magADC[X], mag.magADC[Y], mag.magADC[Z]}};
 
     // add in the basic offsets
     magCorrectField.x += offsets.x;
@@ -537,11 +539,11 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs)
     magCorrectField.z += offsets.z;
 
     // add in scale factor, use a wide sanity check. The calibrator uses a narrower check.
-    if (compassConfig()->scaleFactor > COMPASS_MIN_SCALE_FACTOR || compassConfig()->scaleFactor < COMPASS_MAX_SCALE_FACTOR)
+    if (magScaleFactor > COMPASS_MIN_SCALE_FACTOR || magScaleFactor < COMPASS_MAX_SCALE_FACTOR)
     {
-        magCorrectField.x *= compassConfig()->scaleFactor;
-        magCorrectField.y *= compassConfig()->scaleFactor;
-        magCorrectField.z *= compassConfig()->scaleFactor;
+        magCorrectField.x *= magScaleFactor;
+        magCorrectField.y *= magScaleFactor;
+        magCorrectField.z *= magScaleFactor;
     }
 
     // apply eliptical correction

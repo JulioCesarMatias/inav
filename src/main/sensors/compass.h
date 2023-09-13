@@ -62,10 +62,10 @@ typedef struct compassConfig_s {
     sensor_align_e mag_align;               // on-board mag alignment. Ignored if externally aligned via *DeciDegrees.
     uint8_t mag_hardware;                   // Which mag hardware to use on boards with more than one device
     uint8_t mag_auto_rotate;
-    float offSet[XYZ_AXIS_COUNT];
+    fpVector3_t OffSet;
     float scaleFactor;
-    float diagonals[XYZ_AXIS_COUNT];
-    float offDiagonals[XYZ_AXIS_COUNT];
+    fpVector3_t Diagonals;
+    fpVector3_t OffDiagonals;
 #ifdef USE_DUAL_MAG
     uint8_t mag_to_use;
 #endif

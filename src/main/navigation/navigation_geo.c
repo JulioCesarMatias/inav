@@ -54,7 +54,7 @@ void getMagFieldEF(const gpsLocation_t llh, float *intensity_gauss, float *decli
     const float lon = llh.lon / 10000000.0f;
 
     if (lat < -90.0f || lat > 90.0f || lon < -180.0f || lon > 180.0f) {
-        return 0.0f;
+        return;
     }
 
     /* round down to nearest sampling resolution */

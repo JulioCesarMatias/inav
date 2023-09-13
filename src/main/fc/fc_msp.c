@@ -1330,9 +1330,9 @@ static bool mspFcProcessOutCommand(uint16_t cmdMSP, sbuf_t *dst, mspPostProcessF
         sbufWriteU16(dst, accelerometerConfig()->accGain.raw[Z]);
 
     #ifdef USE_MAG
-        sbufWriteU16(dst, compassConfig()->offSet[X]);
-        sbufWriteU16(dst, compassConfig()->offSet[Y]);
-        sbufWriteU16(dst, compassConfig()->offSet[Z]);
+        sbufWriteU16(dst, compassConfig()->OffSet.x);
+        sbufWriteU16(dst, compassConfig()->OffSet.y);
+        sbufWriteU16(dst, compassConfig()->OffSet.z);
     #else
         sbufWriteU16(dst, 0);
         sbufWriteU16(dst, 0);
@@ -2304,9 +2304,9 @@ static mspResult_e mspFcProcessInCommand(uint16_t cmdMSP, sbuf_t *src)
             accelerometerConfigMutable()->accGain.raw[Z] = sbufReadU16(src);
 
 #ifdef USE_MAG
-            compassConfigMutable()->offSet[X] = sbufReadU16(src);
-            compassConfigMutable()->offSet[Y] = sbufReadU16(src);
-            compassConfigMutable()->offSet[Z] = sbufReadU16(src);
+            compassConfigMutable()->OffSet.x = sbufReadU16(src);
+            compassConfigMutable()->OffSet.y = sbufReadU16(src);
+            compassConfigMutable()->OffSet.z = sbufReadU16(src);
 #else
             sbufReadU16(src);
             sbufReadU16(src);

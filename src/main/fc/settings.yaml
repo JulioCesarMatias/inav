@@ -501,53 +501,66 @@ groups:
         default_value: 0
         min: -18000
         max: 18000
-
-      - name: magOffSet_x
+      - name: magoffset_x
         description: "Magnetometer calibration X offset. If its 0 none offset has been applied and calibration is failed."
         default_value: 0.0
-        field: offSet[X]
+        field: OffSet.x
         min: -10000
         max: 100000
-      - name: magOffSet_y
+      - name: magoffset_y
         description: "Magnetometer calibration Y offset. If its 0 none offset has been applied and calibration is failed."
         default_value: 0.0
-        field: offSet[Y]
+        field: OffSet.y
         min: -10000
         max: 100000
-      - name: magOffSet_z
+      - name: magoffset_z
         description: "Magnetometer calibration Z offset. If its 0 none offset has been applied and calibration is failed."
         default_value: 0.0
-        field: offSet[Z]
+        field: OffSet.z
         min: -10000
         max: 100000
-      - name: scaleFactor
-        min: -10000
-        max: 100000
+      - name: magscalefactor
+        description: "Scaling factor for magnetometer to compensate for sensor scaling errors. If this is 0 then no scaling is done"
         default_value: 0.0
-      - name: diagonals[X]
-        min: -10000
-        max: 100000
+        field: scaleFactor
+        min: 0
+        max: 2
+      - name: magdiagonals_x
+        description: "Magnetometer soft-iron diagonal X component"
         default_value: 1.0
-      - name: diagonals[Y]
+        field: Diagonals.x
         min: -10000
         max: 100000
+      - name: magdiagonals_y
+        description: "Magnetometer soft-iron diagonal Y component"
         default_value: 1.0
-      - name: diagonals[Z]
+        field: Diagonals.y
         min: -10000
         max: 100000
+      - name: magdiagonals_z
+        description: "Magnetometer soft-iron diagonal Z component"
         default_value: 1.0
-      - name: offDiagonals[X]
+        field: Diagonals.z
         min: -10000
         max: 100000
+      - name: magoffdiagonals_x
+        description: "Magnetometer soft-iron off-diagonal X component"
         default_value: 0.0
-      - name: offDiagonals[Y]
+        field: OffDiagonals.x
         min: -10000
         max: 100000
+      - name: magoffdiagonals_y
+        description: "Magnetometer soft-iron off-diagonal Y component"
         default_value: 0.0
-      - name: offDiagonals[Z]
+        field: OffDiagonals.y
         min: -10000
         max: 100000
+      - name: magoffdiagonals_z
+        description: "Magnetometer soft-iron off-diagonal Z component"
         default_value: 0.0
+        field: OffDiagonals.z
+        min: -10000
+        max: 100000
       - name: mag_to_use
         description: "Allow to chose between built-in and external compass sensor if they are connected to separate buses. Currently only for REVO target"
         condition: USE_DUAL_MAG

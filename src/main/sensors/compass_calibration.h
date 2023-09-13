@@ -120,6 +120,7 @@ void compassCalibrationStart(float delay, uint16_t offset_max, float tolerance);
 void compassCalibrationStop(void); // to MSP
 void compassCalibrationSetNewSample(const fpVector3_t sample);
 void compassCalibrationSetOrientation(sensor_align_e orientation, bool is_external, bool fix_orientation);
-void compassCalibrationUpdate(void);
+bool compassIsCalibrating(void);
+void compassCalibrationUpdate(timeUs_t currentTimeUs);
 Report getCompassCalibrationReport(void); // to MSP
 State getCompassCalibrationState(void);   // to MSP

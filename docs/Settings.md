@@ -682,36 +682,6 @@ Defines debug values exposed in debug variables (developer / debugging setting)
 
 ---
 
-### diagonals[X]
-
-_// TODO_
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 1.0 | -10000 | 100000 |
-
----
-
-### diagonals[Y]
-
-_// TODO_
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 1.0 | -10000 | 100000 |
-
----
-
-### diagonals[Z]
-
-_// TODO_
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 1.0 | -10000 | 100000 |
-
----
-
 ### disarm_kill_switch
 
 Disarms the motors independently of throttle value. Setting to OFF reverts to the old behaviour of disarming only when the throttle is low. Only applies when arming and disarming with an AUX channel.
@@ -2122,36 +2092,6 @@ Defines the LTM update rate (use of bandwidth [NORMAL/MEDIUM/SLOW]). See Telemet
 
 ---
 
-### magOffSet_x
-
-Magnetometer calibration X offset. If its 0 none offset has been applied and calibration is failed.
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0.0 | -10000 | 100000 |
-
----
-
-### magOffSet_y
-
-Magnetometer calibration Y offset. If its 0 none offset has been applied and calibration is failed.
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0.0 | -10000 | 100000 |
-
----
-
-### magOffSet_z
-
-Magnetometer calibration Z offset. If its 0 none offset has been applied and calibration is failed.
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0.0 | -10000 | 100000 |
-
----
-
 ### mag_declination
 
 Current location magnetic declination in format. For example, -6deg 37min = -637 for Japan. Leading zero in ddd not required. Get your local magnetic declination here: http://magnetic-declination.com/ . Not in use if inav_auto_mag_decl is turned on and you acquire valid GPS fix.
@@ -2189,6 +2129,106 @@ Allow to chose between built-in and external compass sensor if they are connecte
 | Default | Min | Max |
 | --- | --- | --- |
 | 0 | 0 | 1 |
+
+---
+
+### magdiagonals_x
+
+Magnetometer soft-iron diagonal X component
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 1.0 | -10000 | 100000 |
+
+---
+
+### magdiagonals_y
+
+Magnetometer soft-iron diagonal Y component
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 1.0 | -10000 | 100000 |
+
+---
+
+### magdiagonals_z
+
+Magnetometer soft-iron diagonal Z component
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 1.0 | -10000 | 100000 |
+
+---
+
+### magoffdiagonals_x
+
+Magnetometer soft-iron off-diagonal X component
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | -10000 | 100000 |
+
+---
+
+### magoffdiagonals_y
+
+Magnetometer soft-iron off-diagonal Y component
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | -10000 | 100000 |
+
+---
+
+### magoffdiagonals_z
+
+Magnetometer soft-iron off-diagonal Z component
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | -10000 | 100000 |
+
+---
+
+### magoffset_x
+
+Magnetometer calibration X offset. If its 0 none offset has been applied and calibration is failed.
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | -10000 | 100000 |
+
+---
+
+### magoffset_y
+
+Magnetometer calibration Y offset. If its 0 none offset has been applied and calibration is failed.
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | -10000 | 100000 |
+
+---
+
+### magoffset_z
+
+Magnetometer calibration Z offset. If its 0 none offset has been applied and calibration is failed.
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | -10000 | 100000 |
+
+---
+
+### magscalefactor
+
+Scaling factor for magnetometer to compensate for sensor scaling errors. If this is 0 then no scaling is done
+
+| Default | Min | Max |
+| --- | --- | --- |
+| 0.0 | 0 | 2 |
 
 ---
 
@@ -3832,36 +3872,6 @@ Waypoint radius [cm]. Waypoint would be considered reached if machine is within 
 
 ---
 
-### offDiagonals[X]
-
-_// TODO_
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0.0 | -10000 | 100000 |
-
----
-
-### offDiagonals[Y]
-
-_// TODO_
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0.0 | -10000 | 100000 |
-
----
-
-### offDiagonals[Z]
-
-_// TODO_
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0.0 | -10000 | 100000 |
-
----
-
 ### opflow_hardware
 
 Selection of OPFLOW hardware.
@@ -5259,16 +5269,6 @@ _// TODO_
 | Default | Min | Max |
 | --- | --- | --- |
 | 3000 | 500 | 10000 |
-
----
-
-### scaleFactor
-
-_// TODO_
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0.0 | -10000 | 100000 |
 
 ---
 

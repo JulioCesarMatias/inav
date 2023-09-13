@@ -19,7 +19,7 @@ import math
 
 def write_table(f, name, table):
     '''write one table'''
-    f.write("static const %s[%u][%u] = {\n" %
+    f.write("static const float %s[%u][%u] = {\n" %
             (name, NUM_LAT, NUM_LON))
     for i in range(NUM_LAT):
         f.write("    {")
