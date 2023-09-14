@@ -3,7 +3,7 @@
 # Ported from https://github.com/ArduPilot/ardupilot/tree/master/libraries/AP_Declination/generate
 # Run this script with python3!
 # Note that it requires a fortran compiler. Install the Fortran compiler: https://pypi.org/project/igrf/
-# To install the igrf module, use python3 -m pip install --user igrf12
+# To install the igrf module, use python3 -m pip install --user igrf
 # GCC installation takes hours to install, so don't worry if it takes a while for you. See: https://stackoverflow.com/questions/24966404/brew-install-gcc-too-time-consuming
 
 '''
@@ -18,9 +18,7 @@ from rotmat import Vector3, Matrix3
 import math
 
 def write_table(f, name, table):
-    '''write one table'''
-    f.write("static const float %s[%u][%u] = {\n" %
-            (name, NUM_LAT, NUM_LON))
+    f.write("static const float %s[LAT_TABLE_SIZE][LON_TABLE_SIZE] = {\n" % (name))
     for i in range(NUM_LAT):
         f.write("    {")
         for j in range(NUM_LON):
@@ -32,7 +30,6 @@ def write_table(f, name, table):
             f.write(", ")
         f.write("\n")
     f.write("};\n\n")
-
 
 date = datetime.datetime.now()
 
@@ -57,16 +54,13 @@ max_error_pos = None
 max_error_field = None
 
 def get_igrf(lat, lon):
-    '''return field as [declination_deg, inclination_deg, intensity_gauss]'''
     mag = igrf.igrf(date, glat=lat, glon=lon, alt_km=0., isv=0, itype=1)
     intensity = float(mag.total/1e5)
     inclination = float(mag.incl)
     declination = float(mag.decl)
     return [declination, inclination, intensity]
 
-
 def interpolate_table(table, latitude_deg, longitude_deg):
-    '''interpolate inside a table for a given lat/lon in degrees'''
     # round down to nearest sampling resolution
     min_lat = int(math.floor(latitude_deg / SAMPLING_RES) * SAMPLING_RES)
     min_lon = int(math.floor(longitude_deg / SAMPLING_RES) * SAMPLING_RES)
@@ -93,14 +87,6 @@ def interpolate_table(table, latitude_deg, longitude_deg):
         (data_max - data_min) + data_min
     return value
 
-
-'''
-calculate magnetic field intensity and orientation, interpolating in tables
-
-returns array [declination_deg, inclination_deg, intensity] or None
-'''
-
-
 def interpolate_field(latitude_deg, longitude_deg):
     # limit to table bounds
     if latitude_deg < SAMPLING_MIN_LAT:
@@ -121,17 +107,13 @@ def interpolate_field(latitude_deg, longitude_deg):
 
     return [declination_deg, inclination_deg, intensity_gauss]
 
-
 def field_to_Vector3(mag):
-    '''return mGauss field from dec, inc and intensity'''
     R = Matrix3()
     mag_ef = Vector3(mag[2]*1000.0, 0.0, 0.0)
     R.from_euler(0.0, -math.radians(mag[1]), math.radians(mag[0]))
     return R * mag_ef
 
-
 def test_error(lat, lon):
-    '''check for error from lat,lon'''
     global max_error, max_error_pos, max_error_field
     mag1 = get_igrf(lat, lon)
     mag2 = interpolate_field(lat, lon)
@@ -144,9 +126,7 @@ def test_error(lat, lon):
         max_error_pos = (lat, lon)
         max_error_field = ef1 - ef2
 
-
 def test_max_error(lat, lon):
-    '''check for maximum error from lat,lon over SAMPLING_RES range'''
     steps = 3
     delta = SAMPLING_RES/steps
     for i in range(steps):
@@ -165,7 +145,6 @@ def test_max_error(lat, lon):
             declination_table[i][j] = mag[0]
             inclination_table[i][j] = mag[1]
             intensity_table[i][j] = mag[2]
-
 
 def generate_code(f):
     f.write('''// This is an auto-generated file from the IGRF tables. Do not edit
@@ -201,11 +180,9 @@ def generate_code(f):
     print("Generated with max error %.2f %s at (%.2f,%.2f)" % (
         max_error, max_error_field, max_error_pos[0], max_error_pos[1]))
 
-
 if __name__ == '__main__':
 
-    output = pathlib.PurePath(__file__).parent / '..' / \
-        'main' / 'navigation' / 'navigation_declination_gen.c'
+    output = pathlib.PurePath(__file__).parent / '..' / 'main' / 'navigation' / 'navigation_declination_gen.c'
 
     with open(output, 'w') as f:
         generate_code(f)

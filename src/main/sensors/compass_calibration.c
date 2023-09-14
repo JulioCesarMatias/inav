@@ -53,7 +53,7 @@ status_e _status; // current state of calibrator
 
 // values provided by caller
 float _delay_start_sec; // seconds to delay start of calibration (provided by caller)
-float _tolerance = 5.0; // worst acceptable RMS tolerance (aka fitness).  see set_tolerance()
+float _tolerance = 5.0; // worst acceptable RMS tolerance (aka fitness).
 uint16_t _offset_max;   // maximum acceptable offsets (provided by caller)
 
 // behavioral state

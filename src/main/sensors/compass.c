@@ -80,7 +80,7 @@ PG_RESET_TEMPLATE(compassConfig_t, compassConfig,
 #endif
                   .rollDeciDegrees = SETTING_ALIGN_MAG_ROLL_DEFAULT,
                   .pitchDeciDegrees = SETTING_ALIGN_MAG_PITCH_DEFAULT,
-                  .yawDeciDegrees = SETTING_ALIGN_MAG_YAW_DEFAULT, );
+                  .yawDeciDegrees = SETTING_ALIGN_MAG_YAW_DEFAULT);
 
 static bool magUpdatedAtLeastOnce = false;
 
