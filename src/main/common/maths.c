@@ -317,6 +317,44 @@ fpVector3_t multiplyMatrixByVector(fpMatrix3_t m, fpVector3_t v)
   return vRet;
 }
 
+void matrixTransposed(fpMatrix3_t mIn, fpMatrix3_t *mOut)
+{
+  mOut->m[0][0] = mIn.m[0][0];
+  mOut->m[0][1] = mIn.m[1][0];
+  mOut->m[0][2] = mIn.m[2][0];
+  mOut->m[1][0] = mIn.m[0][1];
+  mOut->m[1][1] = mIn.m[1][1];
+  mOut->m[1][2] = mIn.m[2][1];
+  mOut->m[2][0] = mIn.m[0][2];
+  mOut->m[2][1] = mIn.m[1][2];
+  mOut->m[2][2] = mIn.m[2][2];
+}
+
+bool matrixInvert(fpMatrix3_t *inv)
+{
+    fpMatrix3_t matCopy = *inv;
+    
+    const float d = matCopy.m[0][0] * (matCopy.m[1][1] * matCopy.m[2][2] - matCopy.m[1][2] * matCopy.m[2][1]) + 
+                    matCopy.m[0][1] * (matCopy.m[1][2] * matCopy.m[2][0] - matCopy.m[1][0] * matCopy.m[2][2]) + 
+                    matCopy.m[0][2] * (matCopy.m[1][0] * matCopy.m[2][1] - matCopy.m[1][1] * matCopy.m[2][0]);
+
+    if (d == 0.0f) {
+        return false;
+    }
+
+    inv->m[0][0] = (matCopy.m[1][1] * matCopy.m[2][2] - matCopy.m[2][1] * matCopy.m[1][2]) / d;
+    inv->m[0][1] = (matCopy.m[0][2] * matCopy.m[2][1] - matCopy.m[0][1] * matCopy.m[2][2]) / d;
+    inv->m[0][2] = (matCopy.m[0][1] * matCopy.m[1][2] - matCopy.m[0][2] * matCopy.m[1][1]) / d;
+    inv->m[1][0] = (matCopy.m[1][2] * matCopy.m[2][0] - matCopy.m[1][0] * matCopy.m[2][2]) / d;
+    inv->m[1][1] = (matCopy.m[0][0] * matCopy.m[2][2] - matCopy.m[0][2] * matCopy.m[2][0]) / d;
+    inv->m[1][2] = (matCopy.m[1][0] * matCopy.m[0][2] - matCopy.m[0][0] * matCopy.m[1][2]) / d;
+    inv->m[2][0] = (matCopy.m[1][0] * matCopy.m[2][1] - matCopy.m[2][0] * matCopy.m[1][1]) / d;
+    inv->m[2][1] = (matCopy.m[2][0] * matCopy.m[0][1] - matCopy.m[0][0] * matCopy.m[2][1]) / d;
+    inv->m[2][2] = (matCopy.m[0][0] * matCopy.m[1][1] - matCopy.m[1][0] * matCopy.m[0][1]) / d;
+
+    return true;
+}
+
 // Quick median filter implementation
 // (c) N. Devillard - 1998
 // http://ndevilla.free.fr/median/median.pdf
@@ -808,11 +846,11 @@ static inline void swap(float *a, float *b)
  */
 static void matrix_pivot(const float *A, float *pivot, uint16_t n)
 {
-    /*for(uint16_t i = 0; i < n; i++){
+    for(uint16_t i = 0; i < n; i++){
         for(uint16_t j = 0;j < n; j++) {
-            pivot[i * n + j] = static_cast<float>(i == j);
+            pivot[i * n + j] = (float)(i == j);
         }
-    }*/
+    }
 
     for(uint16_t i = 0; i < n; i++) {
         uint16_t max_j = i;
@@ -869,7 +907,8 @@ static void matrix_LU_decompose(const float *A, float *L, float *U, float *P, ui
             }
         }
     }
-    free(APrime);
+
+    memset(APrime, 0, sizeof(float));
 }
 
 /*
@@ -940,8 +979,8 @@ bool matrix_inverseN(const float *A, float *inv, uint16_t n)
     matrix_back_sub(U, U_inv, n);
 
     // decomposed matrices no longer required
-    free(L);
-    free(U);
+    memset(L, 0, sizeof(float));
+    memset(U, 0, sizeof(float));
 
     float *inv_unpivoted = matrix_multiply(U_inv, L_inv, n);
     float *inv_pivoted = matrix_multiply(inv_unpivoted, P, n);
@@ -955,14 +994,13 @@ bool matrix_inverseN(const float *A, float *inv, uint16_t n)
         }
     }
 
-    memcpy(inv, inv_pivoted,n * n * sizeof(float));
+    memcpy(inv, inv_pivoted, n * n * sizeof(float));
 
-    //free memory
-    free(inv_pivoted);
-    free(inv_unpivoted);
-    free(P);
-    free(U_inv);
-    free(L_inv);
+    memset(inv_pivoted, 0, sizeof(float));
+    memset(inv_unpivoted, 0, sizeof(float));
+    memset(&P[0], 0, sizeof(float));
+    memset(&U_inv[0], 0, sizeof(float));
+    memset(&L_inv[0], 0, sizeof(float));
 
     return ret;
 }

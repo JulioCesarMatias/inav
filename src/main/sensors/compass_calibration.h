@@ -82,8 +82,10 @@ typedef union
 typedef struct
 {
     status_e status;
+    bool calibration_finished;
     uint8_t attempt;
     float completion_pct;
+    uint16_t fit_step; // step during RUNNING_STEP_ONE/TWO which performs sphere fit and ellipsoid fit
 } State;
 
 // Structure accessed after calibration is finished/failed
@@ -117,10 +119,13 @@ typedef struct
 } Settings;
 
 void compassCalibrationStart(float delay, uint16_t offset_max, float tolerance);
-void compassCalibrationStop(void); // to MSP
+void compassCalibrationStop(void);
 void compassCalibrationSetNewSample(const fpVector3_t sample);
 void compassCalibrationSetOrientation(sensor_align_e orientation, bool is_external, bool fix_orientation);
 bool compassIsCalibrating(void);
 void compassCalibrationUpdate(timeUs_t currentTimeUs);
-Report getCompassCalibrationReport(void); // to MSP
-State getCompassCalibrationState(void);   // to MSP
+Report getCompassCalibrationReport(void);
+State getCompassCalibrationState(void);
+void setCompassCalibrationFinished(bool state);
+bool getCompassCalibrationFinished(void);
+bool CompassCalibrationFixedYaw(float yaw_deg, fpVector3_t magfield, fpVector3_t *offsets, fpVector3_t *diagonals, fpVector3_t *offdiagonals);

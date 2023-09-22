@@ -6,7 +6,8 @@
         "__config": "c",
         "__nullptr": "c",
         "locale": "c",
-        "string": "c"
+        "string": "c",
+        "random": "c"
     },
     "editor.tabSize": 4,
     "editor.insertSpaces": true,

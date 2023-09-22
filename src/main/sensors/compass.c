@@ -73,24 +73,31 @@ PG_REGISTER_WITH_RESET_TEMPLATE(compassConfig_t, compassConfig, PG_COMPASS_CONFI
 PG_RESET_TEMPLATE(compassConfig_t, compassConfig,
                   .mag_align = SETTING_ALIGN_MAG_DEFAULT,
                   .mag_hardware = SETTING_MAG_HARDWARE_DEFAULT,
+                  .mag_external = SETTING_MAG_EXTERNAL_DEFAULT,
                   .mag_auto_rotate = SETTING_MAG_ROTATE_AUTO_DEFAULT,
+                  .mag_cal_type = SETTING_MAG_CAL_TYPE_DEFAULT,
                   .mag_declination = SETTING_MAG_DECLINATION_DEFAULT,
+                  .offSet.x = SETTING_MAGOFFSET_X_DEFAULT,
+                  .offSet.y = SETTING_MAGOFFSET_Y_DEFAULT,
+                  .offSet.z = SETTING_MAGOFFSET_Z_DEFAULT,
+                  .scaleFactor = SETTING_MAGSCALEFACTOR_DEFAULT,
+                  .diagonals.x = SETTING_MAGDIAGONALS_X_DEFAULT,
+                  .diagonals.y = SETTING_MAGDIAGONALS_Y_DEFAULT,
+                  .diagonals.z = SETTING_MAGDIAGONALS_Z_DEFAULT,
+                  .offDiagonals.x = SETTING_MAGOFFDIAGONALS_X_DEFAULT,
+                  .offDiagonals.y = SETTING_MAGOFFDIAGONALS_Y_DEFAULT,
+                  .offDiagonals.z = SETTING_MAGOFFDIAGONALS_Z_DEFAULT,
 #ifdef USE_DUAL_MAG
                   .mag_to_use = SETTING_MAG_TO_USE_DEFAULT,
 #endif
-                  .rollDeciDegrees = SETTING_ALIGN_MAG_ROLL_DEFAULT,
-                  .pitchDeciDegrees = SETTING_ALIGN_MAG_PITCH_DEFAULT,
-                  .yawDeciDegrees = SETTING_ALIGN_MAG_YAW_DEFAULT);
+);
 
-static bool magUpdatedAtLeastOnce = false;
+static float yawShoted;
 
 bool compassDetect(magDev_t *dev, magSensor_e magHardwareToUse)
 {
     magSensor_e magHardware = MAG_NONE;
     requestedSensors[SENSOR_INDEX_MAG] = magHardwareToUse;
-
-    dev->magAlign.useExternal = false;
-    dev->magAlign.onBoard = ALIGN_DEFAULT;
 
     switch (magHardwareToUse)
     {
@@ -317,6 +324,7 @@ bool compassDetect(magDev_t *dev, magSensor_e magHardwareToUse)
 
     detectedSensors[SENSOR_INDEX_MAG] = magHardware;
     sensorsSet(SENSOR_MAG);
+
     return true;
 }
 
@@ -343,44 +351,14 @@ bool compassInit(void)
         sensorsClear(SENSOR_MAG);
     }
 
-    if (compassConfig()->rollDeciDegrees != 0 || compassConfig()->pitchDeciDegrees != 0 || compassConfig()->yawDeciDegrees != 0)
-    {
-        // Externally aligned compass
-        mag.dev.magAlign.useExternal = true;
-
-        fp_angles_t compassAngles = {
-            .angles.roll = DECIDEGREES_TO_RADIANS(compassConfig()->rollDeciDegrees),
-            .angles.pitch = DECIDEGREES_TO_RADIANS(compassConfig()->pitchDeciDegrees),
-            .angles.yaw = DECIDEGREES_TO_RADIANS(compassConfig()->yawDeciDegrees),
-        };
-
-        rotationMatrixFromEulerAngles(&mag.dev.magAlign.externalRotation, &compassAngles);
-    }
-    else
-    {
-        mag.dev.magAlign.useExternal = false;
-
-        if (compassConfig()->mag_align != ALIGN_DEFAULT)
-        {
-            mag.dev.magAlign.onBoard = compassConfig()->mag_align;
-        }
-        else
-        {
-            // mag.dev.magAlign.onBoard = CW270_DEG_FLIP; // The most popular default is 270FLIP for external mags
-        }
-    }
+    setCompassCalibrationFinished(true);
 
     return ret;
 }
 
 bool compassIsHealthy(void)
 {
-    return (mag.magADC[X] != 0) || (mag.magADC[Y] != 0) || (mag.magADC[Z] != 0);
-}
-
-bool compassIsReady(void)
-{
-    return magUpdatedAtLeastOnce;
+    return (mag.time - mag.lastUpdateUs < MS2US(500));
 }
 
 bool compassIsCalibrationComplete(void)
@@ -393,24 +371,20 @@ bool compassIsCalibrationComplete(void)
     return false;
 }
 
-timeDelta_t compassUpdate(timeUs_t currentTimeUs)
+void compassUpdate(timeUs_t currentTimeUs)
 {
-    timeDelta_t compassDelay = HZ2US(10); // 10Hz in normal operation (calibration is not running)
-    static bool compassCalibrationStarted = false;
-
 #ifdef USE_SIMULATOR
     if (ARMING_FLAG(SIMULATOR_MODE_HITL))
     {
-        magUpdatedAtLeastOnce = true;
-        return compassDelay;
+        return;
     }
 #endif
 
 #if defined(SITL_BUILD)
     ENABLE_STATE(COMPASS_CALIBRATED);
 #else
-    // Check OffSet
-    if (calc_length_pythagorean_3D(compassConfig()->OffSet.x, compassConfig()->OffSet.y, compassConfig()->OffSet.z) == 0.0f)
+    // Check offSet
+    if (calc_length_pythagorean_3D(compassConfig()->offSet.x, compassConfig()->offSet.y, compassConfig()->offSet.z) == 0.0f)
     {
         DISABLE_STATE(COMPASS_CALIBRATED);
     }
@@ -420,12 +394,14 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs)
     }
 #endif
 
+    mag.time = currentTimeUs;
+
     if (!mag.dev.read(&mag.dev))
     {
-        mag.magADC[X] = 0;
-        mag.magADC[Y] = 0;
-        mag.magADC[Z] = 0;
-        return compassDelay;
+        mag.magADC[X] = 0.0f;
+        mag.magADC[Y] = 0.0f;
+        mag.magADC[Z] = 0.0f;
+        return;
     }
 
     for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++)
@@ -435,52 +411,42 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs)
 
     if (STATE(CALIBRATE_MAG))
     {
-        compassConfigMutable()->scaleFactor = 0.0f;
-        compassConfigMutable()->Diagonals.x = 1.0f;
-        compassConfigMutable()->Diagonals.y = 1.0f;
-        compassConfigMutable()->Diagonals.z = 1.0f;
-        vectorZero(&compassConfigMutable()->OffSet);
-        vectorZero(&compassConfigMutable()->OffDiagonals);
-
-        compassCalibrationStart(COMPASS_CALIBRATION_INIT_DELAY, COMPASS_OFFSETS_MAX_DEFAULT, COMPASS_CALIBRATION_FITNESS_DEFAULT);
-
-        compassCalibrationStarted = true;
-
         beeper(BEEPER_ACTION_SUCCESS);
         DISABLE_STATE(CALIBRATE_MAG);
+
+        if (compassConfig()->mag_cal_type == MAG_CALIBRATION_USING_SAMPLES)
+        {
+            if (!getCompassCalibrationFinished()) // Did the user click the cancel calibration button? Yes...
+            {
+                compassCalibrationStop();
+                setCompassCalibrationFinished(true);
+                return;
+            }
+
+            // Internal compasses get twice the threshold. This is because internal compasses tend to be a lot noisier
+            if (compassConfig()->mag_external == MAG_INTERNAL)
+            {
+                compassCalibrationStart(COMPASS_CALIBRATION_INIT_DELAY, COMPASS_OFFSETS_MAX_DEFAULT, COMPASS_CALIBRATION_FITNESS_DEFAULT * 2);
+            }
+            else
+            {
+                compassCalibrationStart(COMPASS_CALIBRATION_INIT_DELAY, COMPASS_OFFSETS_MAX_DEFAULT, COMPASS_CALIBRATION_FITNESS_DEFAULT);
+            }
+            setCompassCalibrationFinished(false);
+        }
+        else
+        {
+            yawShoted = atan2_approx(rotationMatrix.m[1][0], rotationMatrix.m[0][0]);
+            setCompassCalibrationFinished(false);
+        }
     }
 
-    if (mag.dev.magAlign.useExternal)
-    {
-        fpVector3_t rotated = {
-            .x = mag.magADC[X],
-            .y = mag.magADC[Y],
-            .z = mag.magADC[Z],
-        };
+    applySensorAlignment(mag.magADC, mag.magADC, compassConfig()->mag_align);
+    applyBoardAlignment(mag.magADC);
 
-        multiplicationTransposeMatrixByVector(mag.dev.magAlign.externalRotation, &rotated);
-
-        mag.magADC[X] = rotated.x;
-        mag.magADC[Y] = rotated.y;
-        mag.magADC[Z] = rotated.z;
-    }
-    else
-    {
-        // On-board compass
-        applySensorAlignment(mag.magADC, mag.magADC, mag.dev.magAlign.onBoard);
-        applyBoardAlignment(mag.magADC);
-    }
-
-    if (compassCalibrationStarted)
+    if (!getCompassCalibrationFinished() && compassConfig()->mag_cal_type == MAG_CALIBRATION_USING_SAMPLES)
     {
         LED0_TOGGLE;
-
-        /*
-            Set 40Hz in calibration mode (COMPASS_CAL_NUM_SAMPLES bursts in 7.5 sec)
-            We cannot use 10Hz here, because COMPASS_CAL_NUM_SAMPLES would take a longer burst time
-            Also, leaving it at 40Hz during calibration respects the reschedule time when the AK6983 compass is used
-        */
-        compassDelay = HZ2US(40);
 
         fpVector3_t magSamples = {.v = {mag.magADC[X], mag.magADC[Y], mag.magADC[Z]}};
 
@@ -488,8 +454,9 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs)
 
         if (compassConfig()->mag_auto_rotate)
         {
-            sensor_align_e rotation = mag.dev.magAlign.useExternal ? compassConfig()->mag_align : ALIGN_DEFAULT;
-            compassCalibrationSetOrientation(rotation, mag.dev.magAlign.useExternal, compassConfig()->mag_auto_rotate == 2);
+            const bool isExternalCompass = compassConfig()->mag_external == MAG_EXTERNAL;
+            sensor_align_e rotation = isExternalCompass ? compassConfig()->mag_align : ALIGN_DEFAULT;
+            compassCalibrationSetOrientation(rotation, isExternalCompass, compassConfig()->mag_auto_rotate == 2);
         }
 
         compassCalibrationUpdate(currentTimeUs);
@@ -498,21 +465,21 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs)
 
         if (cal_report.status == COMPASS_CAL_SUCCESS)
         {
-            compassConfigMutable()->OffSet.x = cal_report.ofs.x;
-            compassConfigMutable()->OffSet.y = cal_report.ofs.y;
-            compassConfigMutable()->OffSet.z = cal_report.ofs.z;
+            compassConfigMutable()->offSet.x = cal_report.ofs.x;
+            compassConfigMutable()->offSet.y = cal_report.ofs.y;
+            compassConfigMutable()->offSet.z = cal_report.ofs.z;
 
-            compassConfigMutable()->Diagonals.x = cal_report.diag.x;
-            compassConfigMutable()->Diagonals.y = cal_report.diag.y;
-            compassConfigMutable()->Diagonals.z = cal_report.diag.z;
+            compassConfigMutable()->diagonals.x = cal_report.diag.x;
+            compassConfigMutable()->diagonals.y = cal_report.diag.y;
+            compassConfigMutable()->diagonals.z = cal_report.diag.z;
 
-            compassConfigMutable()->OffDiagonals.x = cal_report.offdiag.x;
-            compassConfigMutable()->OffDiagonals.y = cal_report.offdiag.y;
-            compassConfigMutable()->OffDiagonals.z = cal_report.offdiag.z;
+            compassConfigMutable()->offDiagonals.x = cal_report.offdiag.x;
+            compassConfigMutable()->offDiagonals.y = cal_report.offdiag.y;
+            compassConfigMutable()->offDiagonals.z = cal_report.offdiag.z;
 
             compassConfigMutable()->scaleFactor = cal_report.scale_factor;
 
-            if (cal_report.check_orientation && mag.dev.magAlign.useExternal && compassConfig()->mag_auto_rotate == 2)
+            if (cal_report.check_orientation && compassConfig()->mag_auto_rotate == 2)
             {
                 compassConfigMutable()->mag_align = cal_report.orientation;
             }
@@ -520,33 +487,32 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs)
             if (!compassIsCalibrating())
             {
                 saveConfigAndNotify();
-                compassCalibrationStarted = false;
+                setCompassCalibrationFinished(true);
             }
         }
     }
 
+    const fpVector3_t offsets = {.v = {compassConfig()->offSet.x, compassConfig()->offSet.y, compassConfig()->offSet.z}};
+    const fpVector3_t diagonals = {.v = {compassConfig()->diagonals.x, compassConfig()->diagonals.y, compassConfig()->diagonals.z}};
+    const fpVector3_t offdiagonals = {.v = {compassConfig()->offDiagonals.x, compassConfig()->offDiagonals.y, compassConfig()->offDiagonals.z}};
     const float magScaleFactor = compassConfig()->scaleFactor;
-
-    const fpVector3_t offsets = {.v = {compassConfig()->OffSet.x, compassConfig()->OffSet.y, compassConfig()->OffSet.z}};
-    const fpVector3_t diagonals = {.v = {compassConfig()->Diagonals.x, compassConfig()->Diagonals.y, compassConfig()->Diagonals.z}};
-    const fpVector3_t offdiagonals = {.v = {compassConfig()->OffDiagonals.x, compassConfig()->OffDiagonals.y, compassConfig()->OffDiagonals.z}};
 
     fpVector3_t magCorrectField = {.v = {mag.magADC[X], mag.magADC[Y], mag.magADC[Z]}};
 
-    // add in the basic offsets
+    // Add in the basic offsets
     magCorrectField.x += offsets.x;
     magCorrectField.y += offsets.y;
     magCorrectField.z += offsets.z;
 
-    // add in scale factor, use a wide sanity check. The calibrator uses a narrower check.
-    if (magScaleFactor > COMPASS_MIN_SCALE_FACTOR || magScaleFactor < COMPASS_MAX_SCALE_FACTOR)
+    // Add in scale factor, use a wide sanity check. The calibrator uses a narrower check.
+    if (magScaleFactor > COMPASS_MIN_SCALE_FACTOR && magScaleFactor < COMPASS_MAX_SCALE_FACTOR)
     {
         magCorrectField.x *= magScaleFactor;
         magCorrectField.y *= magScaleFactor;
         magCorrectField.z *= magScaleFactor;
     }
 
-    // apply eliptical correction
+    // Apply eliptical correction
     if (diagonals.x != 0.0f && diagonals.y != 0.0f && diagonals.z != 0.0f)
     {
         fpMatrix3_t mat;
@@ -564,13 +530,24 @@ timeDelta_t compassUpdate(timeUs_t currentTimeUs)
         magCorrectField = multiplyMatrixByVector(mat, magCorrectField);
     }
 
+    if (!getCompassCalibrationFinished() && compassConfig()->mag_cal_type == MAG_CALIBRATION_USING_GPS)
+    {
+        LED0_TOGGLE;
+
+        if (CompassCalibrationFixedYaw(yawShoted, magCorrectField, &compassConfigMutable()->offSet, &compassConfigMutable()->diagonals, &compassConfigMutable()->offDiagonals))
+        {
+            saveConfigAndNotify();
+            setCompassCalibrationFinished(true);
+        }
+    }
+
     mag.magADC[X] = magCorrectField.x;
     mag.magADC[Y] = magCorrectField.y;
     mag.magADC[Z] = magCorrectField.z;
 
-    magUpdatedAtLeastOnce = true;
+    mag.lastUpdateUs = currentTimeUs;
 
-    return compassDelay;
+    return;
 }
 
 #endif

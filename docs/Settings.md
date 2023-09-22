@@ -332,36 +332,6 @@ When running on non-default hardware or adding support for new sensors/sensor bo
 
 ---
 
-### align_mag_pitch
-
-Same as align_mag_roll, but for the pitch axis.
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0 | -1800 | 3600 |
-
----
-
-### align_mag_roll
-
-Set the external mag alignment on the roll axis (in 0.1 degree steps). If this value is non-zero, the compass is assumed to be externally mounted and both the board and on-board compass alignent (align_mag) are ignored. See also align_mag_pitch and align_mag_yaw.
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0 | -1800 | 3600 |
-
----
-
-### align_mag_yaw
-
-Same as align_mag_roll, but for the yaw axis.
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0 | -1800 | 3600 |
-
----
-
 ### align_opflow
 
 Optical flow module alignment (default CW0_DEG_FLIP)
@@ -2092,6 +2062,16 @@ Defines the LTM update rate (use of bandwidth [NORMAL/MEDIUM/SLOW]). See Telemet
 
 ---
 
+### mag_cal_type
+
+SAMPLES: Calibration using Samples, hold your UAV in the air, and rotate it in several directions, until the system obtains enough samples to complete the calibration. GPS: Calibration using GPS, leave your UAV stopped, click to start the compass calibration, and wait for the Off-Sets values to be calculated automatically based on GPS coordinates.
+
+| Default | Min | Max |
+| --- | --- | --- |
+| SAMPLES |  |  |
+
+---
+
 ### mag_declination
 
 Current location magnetic declination in format. For example, -6deg 37min = -637 for Japan. Leading zero in ddd not required. Get your local magnetic declination here: http://magnetic-declination.com/ . Not in use if inav_auto_mag_decl is turned on and you acquire valid GPS fix.
@@ -2099,6 +2079,16 @@ Current location magnetic declination in format. For example, -6deg 37min = -637
 | Default | Min | Max |
 | --- | --- | --- |
 | 0 | -18000 | 18000 |
+
+---
+
+### mag_external
+
+Compass Internal = On FC. Compass External = On GPS
+
+| Default | Min | Max |
+| --- | --- | --- |
+| EXTERNAL |  |  |
 
 ---
 

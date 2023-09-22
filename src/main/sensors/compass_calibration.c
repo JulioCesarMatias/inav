@@ -15,6 +15,52 @@
  * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+/*
+ * The intention of a magnetometer in a compass application is to measure
+ * Earth's magnetic field. Measurements other than those of Earth's magnetic
+ * field are considered errors. This algorithm computes a set of correction
+ * parameters that null out errors from various sources:
+ *
+ * - Sensor bias error
+ * - "Hard iron" error caused by materials fixed to the vehicle body that
+ *     produce static magnetic fields.
+ * - Sensor scale-factor error
+ * - Sensor cross-axis sensitivity
+ * - "Soft iron" error caused by materials fixed to the vehicle body that
+ *     distort magnetic fields.
+ *
+ * This is done by taking a set of samples that are assumed to be the product
+ * of rotation in earth's magnetic field and fitting an offset ellipsoid to
+ * them, determining the correction to be applied to adjust the samples into an
+ * origin-centered sphere.
+ *
+ * The state machine of this library is described entirely by the
+ * CompassCalibrator::Status enum, and all state transitions are managed by the
+ * set_status function. Normally, the library is in the NOT_STARTED state. When
+ * the start function is called, the state transitions to WAITING_TO_START,
+ * until two conditions are met: the delay as elapsed, and the memory for the
+ * sample buffer has been successfully allocated.
+ * Once these conditions are met, the state transitions to RUNNING_STEP_ONE, and
+ * samples are collected via calls to the new_sample function. These samples are
+ * accepted or rejected based on distance to the nearest sample. The samples are
+ * assumed to cover the surface of a sphere, and the radius of that sphere is
+ * initialized to a conservative value. Based on a circle-packing pattern, the
+ * minimum distance is set such that some percentage of the surface of that
+ * sphere must be covered by samples.
+ *
+ * Once the sample buffer is full, a sphere fitting algorithm is run, which
+ * computes a new sphere radius. The sample buffer is thinned of samples which
+ * no longer meet the acceptance criteria, and the state transitions to
+ * RUNNING_STEP_TWO. Samples continue to be collected until the buffer is full
+ * again, the full ellipsoid fit is run, and the state transitions to either
+ * SUCCESS or FAILED.
+ *
+ * The fitting algorithm used is Levenberg-Marquardt. See also:
+ * http://en.wikipedia.org/wiki/Levenberg%E2%80%93Marquardt_algorithm
+ */
+
+// Ported from ArduPilot to INAV by Julio Cesar Matias
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -57,7 +103,7 @@ float _tolerance = 5.0; // worst acceptable RMS tolerance (aka fitness).
 uint16_t _offset_max;   // maximum acceptable offsets (provided by caller)
 
 // behavioral state
-uint32_t _start_time_ms;       // system time start() function was last called
+uint32_t _start_time_us;       // system time start() function was last called
 uint8_t _attempt;              // number of attempts have been made to calibrate
 CompassSample *_sample_buffer; // buffer of sensor values
 uint16_t _samples_collected;   // number of samples in buffer
@@ -65,7 +111,6 @@ uint16_t _samples_thinned;     // number of samples removed by the thin_samples(
 
 // fit state
 param_t _params;         // latest calibration outputs
-uint16_t _fit_step;      // step during RUNNING_STEP_ONE/TWO which performs sphere fit and ellipsoid fit
 float _fitness;          // fitness (mean squared residuals) of current parameters
 float _initial_fitness;  // fitness before latest "fit" was attempted (used to determine if fit was an improvement)
 float _sphere_lambda;    // sphere fit's lambda
@@ -91,7 +136,7 @@ static bool set_status(status_e status);
 void compassCalibrationStart(float delay, uint16_t offset_max, float tolerance)
 {
     // Don't do this while we are already started
-    if (cal_state.status == RUNNING_STEP_ONE || cal_state.status == RUNNING_STEP_TWO)
+    if (_status == RUNNING_STEP_ONE || _status == RUNNING_STEP_TWO)
     {
         return;
     }
@@ -101,7 +146,7 @@ void compassCalibrationStart(float delay, uint16_t offset_max, float tolerance)
     cal_settings.offset_max = offset_max;
     cal_settings.attempt = 1;
     cal_settings.delay_start_sec = delay;
-    cal_settings.start_time_ms = millis();
+    cal_settings.start_time_ms = micros();
     cal_settings.tolerance = tolerance;
 
     // Request status change to Waiting to start
@@ -139,7 +184,6 @@ void compassCalibrationSetOrientation(sensor_align_e orientation, bool is_extern
 
 bool compassIsCalibrating(void)
 {
-
     switch (cal_state.status)
     {
     case NOT_STARTED:
@@ -174,7 +218,7 @@ bool compassIsCalibrating(void)
  * The above equation was proved after solving for spherical triangular excess
  * and related equations.
  */
-bool accept_sample(const CompassSample sample, uint16_t skip_index)
+static bool accept_sample(const CompassSample sample, uint16_t skip_index)
 {
     const uint16_t faces = (2 * COMPASS_CAL_NUM_SAMPLES - 4);
     const float a = (4.0f * M_PI / (3.0f * faces)) + M_PI / 3.0f;
@@ -198,10 +242,11 @@ bool accept_sample(const CompassSample sample, uint16_t skip_index)
             }
         }
     }
+
     return true;
 }
 
-void pull_sample(void)
+static void pull_sample(void)
 {
     CompassSample mag_sample;
 
@@ -218,14 +263,14 @@ void pull_sample(void)
     _new_sample = false;
     mag_sample = _last_sample;
 
-    if ((cal_state.status == RUNNING_STEP_ONE || cal_state.status == RUNNING_STEP_TWO) && _samples_collected < COMPASS_CAL_NUM_SAMPLES && accept_sample(mag_sample, 65535U))
+    if ((_status == RUNNING_STEP_ONE || _status == RUNNING_STEP_TWO) && _samples_collected < COMPASS_CAL_NUM_SAMPLES && accept_sample(mag_sample, 65535U))
     {
         _sample_buffer[_samples_collected] = mag_sample;
         _samples_collected++;
     }
 }
 
-void thin_samples(void)
+static void thin_samples(void)
 {
     if (_sample_buffer == NULL)
     {
@@ -233,8 +278,9 @@ void thin_samples(void)
     }
 
     _samples_thinned = 0;
-    // shuffle the samples http://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
-    // this is so that adjacent samples don't get sequentially eliminated
+
+    // Shuffle the samples http://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
+    // This is so that adjacent samples don't get sequentially eliminated
     for (uint16_t i = _samples_collected - 1; i >= 1; i--)
     {
         uint16_t j = get_random16() % (i + 1);
@@ -243,7 +289,7 @@ void thin_samples(void)
         _sample_buffer[j] = temp;
     }
 
-    // remove any samples that are close together
+    // Remove any samples that are close together
     for (uint16_t i = 0; i < _samples_collected; i++)
     {
         if (!accept_sample(_sample_buffer[i], i))
@@ -255,7 +301,7 @@ void thin_samples(void)
     }
 }
 
-void update_cal_settings(void)
+static void update_cal_settings(void)
 {
     _tolerance = cal_settings.tolerance;
     _check_orientation = cal_settings.check_orientation;
@@ -266,17 +312,17 @@ void update_cal_settings(void)
     _offset_max = cal_settings.offset_max;
     _attempt = cal_settings.attempt;
     _delay_start_sec = cal_settings.delay_start_sec;
-    _start_time_ms = cal_settings.start_time_ms;
+    _start_time_us = cal_settings.start_time_ms;
 }
 
-void update_cal_status(void)
+static void update_cal_status(void)
 {
     cal_state.status = _status;
     cal_state.attempt = _attempt;
     cal_state.completion_pct = 0.0f;
 
-    // first sampling step is 1/3rd of the progress bar
-    // never return more than 99% unless _status is COMPASS_CAL_SUCCESS
+    // First sampling step is 1/3rd of the progress bar
+    // Never return more than 99% unless _status is COMPASS_CAL_SUCCESS
     switch (_status)
     {
     case NOT_STARTED:
@@ -304,7 +350,7 @@ void update_cal_status(void)
     };
 }
 
-void update_cal_report(void)
+static void update_cal_report(void)
 {
     cal_report.status = _status;
     cal_report.fitness = sqrtf(_fitness);
@@ -328,13 +374,17 @@ State getCompassCalibrationState(void)
     return cal_state;
 }
 
-// fitting method for use in thread
-static bool _fitting(void)
+void setCompassCalibrationFinished(bool state)
 {
-    return (cal_state.status == RUNNING_STEP_ONE || cal_state.status == RUNNING_STEP_TWO) && (_samples_collected == COMPASS_CAL_NUM_SAMPLES);
+    cal_state.calibration_finished = state;
 }
 
-// initialize fitness before starting a fit
+bool getCompassCalibrationFinished(void) 
+{
+    return cal_state.calibration_finished;
+}
+
+// Initialize fitness before starting a fit
 static void initialize_fit(void)
 {
     if (_samples_collected != 0)
@@ -349,7 +399,7 @@ static void initialize_fit(void)
     _initial_fitness = _fitness;
     _sphere_lambda = 1.0f;
     _ellipsoid_lambda = 1.0f;
-    _fit_step = 0;
+    cal_state.fit_step = 0;
 }
 
 static void reset_state(void)
@@ -380,7 +430,6 @@ static bool set_status(status_e status)
         _status = NOT_STARTED;
         if (_sample_buffer != NULL)
         {
-            free(_sample_buffer);
             _sample_buffer = NULL;
         }
         return true;
@@ -397,8 +446,8 @@ static bool set_status(status_e status)
             return false;
         }
 
-        // on first attempt delay start if requested by caller
-        if (_attempt == 1 && (millis() - _start_time_ms) * 1.0e-3f < _delay_start_sec)
+        // On first attempt delay start if requested by caller
+        if (_attempt == 1 && (micros() - _start_time_us) < MS2US(_delay_start_sec))
         {
             return false;
         }
@@ -434,7 +483,6 @@ static bool set_status(status_e status)
 
         if (_sample_buffer != NULL)
         {
-            free(_sample_buffer);
             _sample_buffer = NULL;
         }
 
@@ -444,7 +492,7 @@ static bool set_status(status_e status)
     case COMPASS_CAL_FAILED:
         if (_status == BAD_ORIENTATION || _status == BAD_RADIUS)
         {
-            // don't overwrite bad orientation status
+            // Don't overwrite bad orientation status
             return false;
         }
         FALLTHROUGH;
@@ -464,7 +512,6 @@ static bool set_status(status_e status)
 
         if (_sample_buffer != NULL)
         {
-            free(_sample_buffer);
             _sample_buffer = NULL;
         }
 
@@ -476,7 +523,7 @@ static bool set_status(status_e status)
     };
 }
 
-bool fit_acceptable(void)
+static bool fit_acceptable(void)
 {
     if (!isnan(_fitness) &&
         _params.radius > FIELD_RADIUS_MIN && _params.radius < FIELD_RADIUS_MAX &&
@@ -486,7 +533,7 @@ bool fit_acceptable(void)
         _params.diag.x > 0.2f && _params.diag.x < 5.0f &&
         _params.diag.y > 0.2f && _params.diag.y < 5.0f &&
         _params.diag.z > 0.2f && _params.diag.z < 5.0f &&
-        fabsf(_params.offdiag.x) < 1.0f && // absolute of sine/cosine output cannot be greater than 1
+        fabsf(_params.offdiag.x) < 1.0f && // Absolute of sine/cosine output cannot be greater than 1
         fabsf(_params.offdiag.y) < 1.0f &&
         fabsf(_params.offdiag.z) < 1.0f)
     {
@@ -496,7 +543,7 @@ bool fit_acceptable(void)
     return false;
 }
 
-float calc_residual(const fpVector3_t sample, const param_t params)
+static float calc_residual(const fpVector3_t sample, const param_t params)
 {
     fpMatrix3_t softiron;
 
@@ -516,7 +563,7 @@ float calc_residual(const fpVector3_t sample, const param_t params)
     return params.radius - calc_length_pythagorean_3D(softIronBySample.x, softIronBySample.y, softIronBySample.z);
 }
 
-// calc the fitness given a set of parameters (offsets, diagonals, off diagonals)
+// Calc the fitness given a set of parameters (offsets, diagonals, off diagonals)
 static float calc_mean_squared_residuals(const param_t params)
 {
     if (_sample_buffer == NULL || _samples_collected == 0)
@@ -538,8 +585,8 @@ static float calc_mean_squared_residuals(const param_t params)
     return sum;
 }
 
-// calculate initial offsets by simply taking the average values of the samples
-void calc_initial_offset(void)
+// Calculate initial offsets by simply taking the average values of the samples
+static void calc_initial_offset(void)
 {
     // Set initial offset to the average value of the samples
     vectorZero(&_params.offset);
@@ -556,7 +603,7 @@ void calc_initial_offset(void)
     _params.offset.z /= _samples_collected;
 }
 
-void calc_sphere_jacob(const fpVector3_t sample, const param_t params, float *ret)
+static void calc_sphere_jacob(const fpVector3_t sample, const param_t params, float *ret)
 {
     const fpVector3_t offset = params.offset;
     const fpVector3_t diag = params.diag;
@@ -592,7 +639,7 @@ void calc_sphere_jacob(const fpVector3_t sample, const param_t params, float *re
 }
 
 // run sphere fit to calculate diagonals and offdiagonals
-void run_sphere_fit(void)
+static void run_sphere_fit(void)
 {
     if (_sample_buffer == NULL)
     {
@@ -622,19 +669,20 @@ void run_sphere_fit(void)
 
         for (uint8_t i = 0; i < COMPASS_CAL_NUM_SPHERE_PARAMS; i++)
         {
-            // compute JTJ
+            // Compute JTJ
             for (uint8_t j = 0; j < COMPASS_CAL_NUM_SPHERE_PARAMS; j++)
             {
                 JTJ[i * COMPASS_CAL_NUM_SPHERE_PARAMS + j] += sphere_jacob[i] * sphere_jacob[j];
-                JTJ2[i * COMPASS_CAL_NUM_SPHERE_PARAMS + j] += sphere_jacob[i] * sphere_jacob[j]; // a backup JTJ for LM
+                JTJ2[i * COMPASS_CAL_NUM_SPHERE_PARAMS + j] += sphere_jacob[i] * sphere_jacob[j]; // A backup JTJ for LM
             }
-            // compute JTFI
+            // Compute JTFI
             JTFI[i] += sphere_jacob[i] * calc_residual(sample, fit1_params);
         }
     }
 
     //------------------------Levenberg-Marquardt-part-starts-here---------------------------------//
     // refer: http://en.wikipedia.org/wiki/Levenberg%E2%80%93Marquardt_algorithm#Choice_of_damping_parameter
+
     for (uint8_t i = 0; i < COMPASS_CAL_NUM_SPHERE_PARAMS; i++)
     {
         JTJ[i * COMPASS_CAL_NUM_SPHERE_PARAMS + i] += _sphere_lambda;
@@ -651,7 +699,7 @@ void run_sphere_fit(void)
         return;
     }
 
-    // extract radius, offset, diagonals and offdiagonal parameters
+    // Extract radius, offset, diagonals and offdiagonal parameters
     for (uint8_t row = 0; row < COMPASS_CAL_NUM_SPHERE_PARAMS; row++)
     {
         for (uint8_t col = 0; col < COMPASS_CAL_NUM_SPHERE_PARAMS; col++)
@@ -663,19 +711,19 @@ void run_sphere_fit(void)
         }
     }
 
-    // calculate fitness of two possible sets of parameters
+    // Calculate fitness of two possible sets of parameters
     fit1 = calc_mean_squared_residuals(fit1_params);
     fit2 = calc_mean_squared_residuals(fit2_params);
 
-    // decide which of the two sets of parameters is best and store in fit1_params
+    // Decide which of the two sets of parameters is best and store in fit1_params
     if (fit1 > _fitness && fit2 > _fitness)
     {
-        // if neither set of parameters provided better results, increase lambda
+        // If neither set of parameters provided better results, increase lambda
         _sphere_lambda *= lma_damping;
     }
     else if (fit2 < _fitness && fit2 < fit1)
     {
-        // if fit2 was better we will use it. decrease lambda
+        // If fit2 was better we will use it. decrease lambda
         _sphere_lambda /= lma_damping;
         fit1_params = fit2_params;
         fitness = fit2;
@@ -684,9 +732,10 @@ void run_sphere_fit(void)
     {
         fitness = fit1;
     }
+
     //--------------------Levenberg-Marquardt-part-ends-here--------------------------------//
 
-    // store new parameters and update fitness
+    // Store new parameters and update fitness
     if (!isnan(fitness) && fitness < _fitness)
     {
         _fitness = fitness;
@@ -694,7 +743,7 @@ void run_sphere_fit(void)
     }
 }
 
-void calc_ellipsoid_jacob(const fpVector3_t sample, const param_t params, float *ret)
+static void calc_ellipsoid_jacob(const fpVector3_t sample, const param_t params, float *ret)
 {
     const fpVector3_t offset = params.offset;
     const fpVector3_t diag = params.diag;
@@ -737,7 +786,7 @@ void calc_ellipsoid_jacob(const fpVector3_t sample, const param_t params, float 
     ret[8] = -1.0f * (((sample.z + offset.z) * B) + ((sample.y + offset.y) * C)) / length;
 }
 
-void run_ellipsoid_fit(void)
+static void run_ellipsoid_fit(void)
 {
     if (_sample_buffer == NULL)
     {
@@ -746,7 +795,7 @@ void run_ellipsoid_fit(void)
 
     const float lma_damping = 10.0f;
 
-    // take backup of fitness and parameters so we can determine later if this fit has improved the calibration
+    // Take backup of fitness and parameters so we can determine later if this fit has improved the calibration
     float fitness = _fitness;
     float fit1, fit2;
     param_t fit1_params, fit2_params;
@@ -780,6 +829,7 @@ void run_ellipsoid_fit(void)
 
     //------------------------Levenberg-Marquardt-part-starts-here---------------------------------//
     // refer: http://en.wikipedia.org/wiki/Levenberg%E2%80%93Marquardt_algorithm#Choice_of_damping_parameter
+
     for (uint8_t i = 0; i < COMPASS_CAL_NUM_ELLIPSOID_PARAMS; i++)
     {
         JTJ[i * COMPASS_CAL_NUM_ELLIPSOID_PARAMS + i] += _ellipsoid_lambda;
@@ -796,7 +846,7 @@ void run_ellipsoid_fit(void)
         return;
     }
 
-    // extract radius, offset, diagonals and offdiagonal parameters
+    // Extract radius, offset, diagonals and offdiagonal parameters
     for (uint8_t row = 0; row < COMPASS_CAL_NUM_ELLIPSOID_PARAMS; row++)
     {
         for (uint8_t col = 0; col < COMPASS_CAL_NUM_ELLIPSOID_PARAMS; col++)
@@ -808,19 +858,19 @@ void run_ellipsoid_fit(void)
         }
     }
 
-    // calculate fitness of two possible sets of parameters
+    // Calculate fitness of two possible sets of parameters
     fit1 = calc_mean_squared_residuals(fit1_params);
     fit2 = calc_mean_squared_residuals(fit2_params);
 
-    // decide which of the two sets of parameters is best and store in fit1_params
+    // Decide which of the two sets of parameters is best and store in fit1_params
     if (fit1 > _fitness && fit2 > _fitness)
     {
-        // if neither set of parameters provided better results, increase lambda
+        // If neither set of parameters provided better results, increase lambda
         _ellipsoid_lambda *= lma_damping;
     }
     else if (fit2 < _fitness && fit2 < fit1)
     {
-        // if fit2 was better we will use it. decrease lambda
+        // If fit2 was better we will use it. decrease lambda
         _ellipsoid_lambda /= lma_damping;
         fit1_params = fit2_params;
         fitness = fit2;
@@ -829,9 +879,10 @@ void run_ellipsoid_fit(void)
     {
         fitness = fit1;
     }
+
     //--------------------Levenberg-part-ends-here--------------------------------//
 
-    // store new parameters and update fitness
+    // Store new parameters and update fitness
     if (fitness < _fitness)
     {
         _fitness = fitness;
@@ -885,17 +936,17 @@ static bool verifyForRightAngleRotation(const sensor_align_e r)
   Note that this earth field uses an arbitrary north reference, so it
   may not match the true earth field.
  */
-fpVector3_t calculate_earth_field(CompassSample sample, sensor_align_e r)
+static fpVector3_t calculate_earth_field(CompassSample sample, sensor_align_e r)
 {
     fpVector3_t v = {.v = {COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(sample.x), COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(sample.y), COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(sample.z)}};
 
-    // convert the sample back to sensor frame
+    // Convert the sample back to sensor frame
     vectorRotateInverse(&v, _orientation);
 
-    // rotate to body frame for this rotation
+    // Rotate to body frame for this rotation
     vectorRotate(&v, r);
 
-    // apply offsets, rotating them for the orientation we are testing
+    // Apply offsets, rotating them for the orientation we are testing
     fpVector3_t rot_offsets = _params.offset;
     vectorRotateInverse(&rot_offsets, _orientation);
 
@@ -905,33 +956,31 @@ fpVector3_t calculate_earth_field(CompassSample sample, sensor_align_e r)
     v.y += rot_offsets.y;
     v.z += rot_offsets.z;
 
-    // rotate the sample from body frame back to earth frame
+    // Rotate the sample from body frame back to earth frame
     fpMatrix3_t rot = getRotationMatrixFromAHRS();
 
     fpVector3_t efield = multiplyMatrixByVector(rot, v);
 
-    // earth field is the mag sample in earth frame
+    // Earth field is the mag sample in earth frame
     return efield;
 }
 
 /*
-  calculate compass orientation using the attitude estimate associated
-  with each sample, and fix orientation on external compasses if
-  the feature is enabled
+  Calculate compass orientation using the attitude estimate associated with each sample, and fix orientation on external compasses if the feature is enabled
  */
-bool calculate_orientation(timeUs_t currentTimeUs)
+static bool calculate_orientation(timeUs_t currentTimeUs)
 {
     if (!_check_orientation)
     {
-        // we are not checking orientation
+        // We are not checking orientation
         return true;
     }
 
-    // create a routine of delay
+    // Create a routine of delay
     static timeUs_t autoOrientationLastServiced = 0;
     timeDelta_t autoOrientationTimeSinceLastServiced = cmpTimeUs(currentTimeUs, autoOrientationLastServiced);
-    
-    // this function is very slow
+
+    // This function is very slow
     if (autoOrientationLastServiced == 0 || autoOrientationTimeSinceLastServiced > S2US(1))
     {
         float variance[ALIGN_ROTATION_MAX];
@@ -942,7 +991,7 @@ bool calculate_orientation(timeUs_t currentTimeUs)
         {
             sensor_align_e r = (sensor_align_e)n;
 
-            // calculate the average implied earth field across all samples
+            // Calculate the average implied earth field across all samples
             fpVector3_t total_ef;
             for (uint32_t i = 0; i < _samples_collected; i++)
             {
@@ -954,17 +1003,17 @@ bool calculate_orientation(timeUs_t currentTimeUs)
 
             fpVector3_t avg_efield = {.v = {total_ef.x / _samples_collected, total_ef.y / _samples_collected, total_ef.z / _samples_collected}};
 
-            // now calculate the square error for this rotation against the average earth field
+            // Now calculate the square error for this rotation against the average earth field
             for (uint32_t i = 0; i < _samples_collected; i++)
             {
                 fpVector3_t efield = calculate_earth_field(_sample_buffer[i], r);
                 float err = sq(efield.x - avg_efield.x) + sq(efield.y - avg_efield.y) + sq(efield.z - avg_efield.z);
-                // divide by number of samples collected to get the variance
+                // Divide by number of samples collected to get the variance
                 variance[n] += err / _samples_collected;
             }
         }
 
-        // find the rotation with the lowest variance
+        // Find the rotation with the lowest variance
         sensor_align_e besti = ALIGN_DEFAULT;
         sensor_align_e besti_90 = ALIGN_DEFAULT;
         float bestv = variance[0];
@@ -1010,21 +1059,20 @@ bool calculate_orientation(timeUs_t currentTimeUs)
 
         bool pass;
 
-        if (besti == _orientation)
+        if (besti == _orientation) // If the orientation matched then allow for a low threshold
         {
-            // if the orientation matched then allow for a low threshold
             pass = true;
         }
         else
         {
             if (_orientation_confidence > 4.0)
             {
-                // very confident, always pass
+                // Very confident, always pass
                 pass = true;
             }
             else
             {
-                // just consider 90's
+                // Just consider 90's
                 _orientation_confidence = second_best_90 / bestv_90;
                 pass = _orientation_confidence > 2.0;
                 besti = besti_90;
@@ -1056,26 +1104,26 @@ bool calculate_orientation(timeUs_t currentTimeUs)
 
         if (_orientation == besti)
         {
-            // no orientation change
+            // No orientation change
             return true;
         }
 
         if (!_is_external || !_fix_orientation)
         {
-            // we won't change the orientation, but we set _orientation for reporting purposes
+            // We won't change the orientation, but we set _orientation for reporting purposes
             _orientation = besti;
             _orientation_solution = besti;
             set_status(BAD_ORIENTATION);
             return false;
         }
 
-        // correct the offsets for the new orientation
+        // Correct the offsets for the new orientation
         fpVector3_t rot_offsets = _params.offset;
         vectorRotateInverse(&rot_offsets, _orientation);
         vectorRotate(&rot_offsets, besti);
         _params.offset = rot_offsets;
 
-        // rotate the samples for the new orientation
+        // Rotate the samples for the new orientation
         for (uint32_t i = 0; i < _samples_collected; i++)
         {
             fpVector3_t s = {.v = {COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(_sample_buffer[i].x), COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(_sample_buffer[i].y), COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(_sample_buffer[i].z)}};
@@ -1089,7 +1137,7 @@ bool calculate_orientation(timeUs_t currentTimeUs)
         _orientation = besti;
         _orientation_solution = besti;
 
-        // re-run the fit to get the diagonals and off-diagonals for the new orientation
+        // Re-run the fit to get the diagonals and off-diagonals for the new orientation
         initialize_fit();
         run_sphere_fit();
         run_ellipsoid_fit();
@@ -1100,8 +1148,8 @@ bool calculate_orientation(timeUs_t currentTimeUs)
     return fit_acceptable();
 }
 
-// fix radius of the fit to compensate for sensor scale factor errors return false if radius is outside acceptable range
-bool fix_radius(void)
+// Fix radius of the fit to compensate for sensor scale factor errors return false if radius is outside acceptable range
+static bool fix_radius(void)
 {
     if (!isGPSTrustworthy())
     {
@@ -1117,10 +1165,10 @@ bool fix_radius(void)
 
     getMagFieldEF(newLLH, &intensity, &declination, &inclination);
 
-    float expected_radius = intensity * 1000.0f; // mGauss
+    float expected_radius = intensity * 1000.0f; // milliGauss
     float correction = expected_radius / _params.radius;
 
-    if (correction > COMPASS_MAX_SCALE_FACTOR || correction < COMPASS_MIN_SCALE_FACTOR)
+    if (correction > COMPASS_MAX_SCALE_FACTOR && correction < COMPASS_MIN_SCALE_FACTOR)
     {
         set_status(BAD_RADIUS);
         return false;
@@ -1133,40 +1181,42 @@ bool fix_radius(void)
 
 void compassCalibrationUpdate(timeUs_t currentTimeUs)
 {
-    // pickup samples from intermediate struct
+    // Pickup samples from intermediate struct
     pull_sample();
 
-    bool running = (cal_state.status == RUNNING_STEP_ONE || cal_state.status == RUNNING_STEP_TWO);
+    const bool running = (cal_state.status == RUNNING_STEP_ONE || cal_state.status == RUNNING_STEP_TWO);
 
-    // update_settings
+    // Update_settings
     if (!running)
     {
         update_cal_settings();
     }
 
-    // update requested state
+    // Update requested state
     if (_status_set_requested)
     {
         _status_set_requested = false;
         set_status(_requested_status);
     }
 
-    // update report and status
+    // Update report and status
     update_cal_status();
     update_cal_report();
 
-    // collect the minimum number of samples
-    if (!_fitting())
+    // Collect the minimum number of samples
+    const bool fitting = (_status == RUNNING_STEP_ONE || _status == RUNNING_STEP_TWO) && (_samples_collected == COMPASS_CAL_NUM_SAMPLES);
+
+    if (!fitting)
     {
         return;
     }
 
     if (_status == RUNNING_STEP_ONE)
     {
-        if (_fit_step >= 10)
+        if (cal_state.fit_step >= 10)
         {
-            if (_fitness == _initial_fitness || isnan(_fitness))
-            { // if true, means that fitness is diverging instead of converging
+            if (_fitness == _initial_fitness || isnan(_fitness)) // If true, means that fitness is diverging instead of converging
+            {
                 set_status(COMPASS_CAL_FAILED);
             }
             else
@@ -1176,17 +1226,17 @@ void compassCalibrationUpdate(timeUs_t currentTimeUs)
         }
         else
         {
-            if (_fit_step == 0)
+            if (cal_state.fit_step == 0)
             {
                 calc_initial_offset();
             }
             run_sphere_fit();
-            _fit_step++;
+            cal_state.fit_step++;
         }
     }
     else if (_status == RUNNING_STEP_TWO)
     {
-        if (_fit_step >= 35)
+        if (cal_state.fit_step >= 35)
         {
             if (fit_acceptable() && fix_radius() && calculate_orientation(currentTimeUs))
             {
@@ -1197,15 +1247,119 @@ void compassCalibrationUpdate(timeUs_t currentTimeUs)
                 set_status(COMPASS_CAL_FAILED);
             }
         }
-        else if (_fit_step < 15)
+        else if (cal_state.fit_step < 15)
         {
             run_sphere_fit();
-            _fit_step++;
+            cal_state.fit_step++;
         }
         else
         {
             run_ellipsoid_fit();
-            _fit_step++;
+            cal_state.fit_step++;
         }
     }
+}
+
+// Get mag field with the effects of offsets, diagonals and off-diagonals removed
+static bool getUncorrectedField(fpVector3_t *field, fpVector3_t offsets, fpVector3_t diagonals, fpVector3_t offdiagonals)
+{
+    // Get corrected field
+    fpVector3_t correctedField = *field;
+
+    // Form eliptical correction matrix and invert it. This is needed to remove the effects of the eliptical correction when calculating new offsets
+    if (diagonals.x != 0.0f && diagonals.y != 0.0f && diagonals.z != 0.0f)
+    {
+        fpMatrix3_t mat;
+
+        mat.m[0][0] = diagonals.x;
+        mat.m[0][1] = offdiagonals.x;
+        mat.m[0][2] = offdiagonals.y;
+        mat.m[1][0] = offdiagonals.x;
+        mat.m[1][1] = diagonals.y;
+        mat.m[1][2] = offdiagonals.z;
+        mat.m[2][0] = offdiagonals.y;
+        mat.m[2][1] = offdiagonals.z;
+        mat.m[2][2] = diagonals.z;
+
+        if (!matrixInvert(&mat))
+        {
+            return false;
+        }
+
+        // Remove impact of diagonals and off-diagonals
+        *field = multiplyMatrixByVector(mat, correctedField);
+    }
+
+    // Remove impact of offsets
+    field->x -= offsets.x;
+    field->y -= offsets.y;
+    field->z -= offsets.z;
+
+    return true;
+}
+
+/*
+  Fast compass calibration given vehicle position and yaw.
+  This results in zero diagonal and off-diagonal elements, so is only suitable for vehicles where the field is close to spherical. It is useful for large vehicles where moving the vehicle to calibrate it is difficult.
+  The offsets of the selected compasses are set to values to bring them into consistency with the intensity, declination and inclination tables at the given latitude and longitude.
+  This assumes that the compass is correctly scaled in milliGauss
+*/
+bool CompassCalibrationFixedYaw(float yaw_value, fpVector3_t magfield, fpVector3_t *offsets, fpVector3_t *diagonals, fpVector3_t *offdiagonals)
+{
+    if (!isGPSTrustworthy())
+    {
+        return false;
+    }
+
+    gpsLocation_t newLLH = {gpsSol.llh.lat, gpsSol.llh.lon, gpsSol.llh.alt};
+
+    // Get the magnetic field intensity and orientation
+    float intensity;
+    float declination;
+    float inclination;
+
+    getMagFieldEF(newLLH, &intensity, &declination, &inclination);
+
+    // Create a field vector and rotate to the required orientation
+    fpVector3_t field = {.v = {1e3f * intensity, 0.0f, 0.0}};
+    fpMatrix3_t R;
+    fp_angles_t magFieldAngles = {.angles.roll = 0.0f,
+                                  .angles.pitch = -DEGREES_TO_RADIANS(inclination),
+                                  .angles.yaw = DEGREES_TO_RADIANS(declination)};
+
+    rotationMatrixFromEulerAngles(&R, &magFieldAngles);
+
+    field = multiplyMatrixByVector(R, field);
+
+    fpMatrix3_t ahrs;
+    fp_angles_t ahrsAngles = {.angles.roll = atan2_approx(rotationMatrix.m[2][1], rotationMatrix.m[2][2]),
+                              .angles.pitch = ((0.5f * M_PIf) - acos_approx(rotationMatrix.m[2][0])),
+                              .angles.yaw = yaw_value};
+
+    rotationMatrixFromEulerAngles(&ahrs, &ahrsAngles);
+
+    // Rotate into body frame using provided yaw
+    matrixTransposed(rotationMatrix, &ahrs);
+    field = multiplyMatrixByVector(ahrs, field);
+
+    fpVector3_t measurement = magfield;
+
+    if (!getUncorrectedField(&measurement, *offsets, *diagonals, *offdiagonals))
+    {
+        return false;
+    }
+
+    offsets->x = field.x - measurement.x;
+    offsets->y = field.y - measurement.y;
+    offsets->z = field.z - measurement.z;
+
+    diagonals->x = 1.0f;
+    diagonals->y = 1.0f;
+    diagonals->z = 1.0f;
+
+    offdiagonals->x = 0.0f;
+    offdiagonals->y = 0.0f;
+    offdiagonals->z = 0.0f;
+
+    return true;
 }

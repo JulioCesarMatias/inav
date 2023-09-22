@@ -47,9 +47,21 @@ typedef enum {
     MAG_MAX = MAG_FAKE
 } magSensor_e;
 
+typedef enum {
+    MAG_INTERNAL = 0,
+    MAG_EXTERNAL
+} mag_external_e;
+
+typedef enum {
+    MAG_CALIBRATION_USING_SAMPLES = 0,
+    MAG_CALIBRATION_USING_GPS
+} magCalibrationType_e;
+
 typedef struct mag_s {
     magDev_t dev;
     float magADC[XYZ_AXIS_COUNT];
+    timeUs_t time;
+    timeUs_t lastUpdateUs;
 } mag_t;
 
 extern mag_t mag;
@@ -61,25 +73,23 @@ typedef struct compassConfig_s {
                                             // For example, -6deg 37min, = -637 Japan, format is [sign]dddmm (degreesminutes) default is zero.
     sensor_align_e mag_align;               // on-board mag alignment. Ignored if externally aligned via *DeciDegrees.
     uint8_t mag_hardware;                   // Which mag hardware to use on boards with more than one device
+    uint8_t mag_external;   
     uint8_t mag_auto_rotate;
-    fpVector3_t OffSet;
+    uint8_t mag_cal_type;
+    fpVector3_t offSet;
     float scaleFactor;
-    fpVector3_t Diagonals;
-    fpVector3_t OffDiagonals;
+    fpVector3_t diagonals;
+    fpVector3_t offDiagonals;
 #ifdef USE_DUAL_MAG
     uint8_t mag_to_use;
 #endif
-    int16_t rollDeciDegrees;                // Alignment for external mag on the roll (X) axis (0.1deg)
-    int16_t pitchDeciDegrees;               // Alignment for external mag on the pitch (Y) axis (0.1deg)
-    int16_t yawDeciDegrees;                 // Alignment for external mag on the yaw (Z) axis (0.1deg)
 } compassConfig_t;
 
 PG_DECLARE(compassConfig_t, compassConfig);
 
 bool compassDetect(magDev_t *dev, magSensor_e magHardwareToUse);
 bool compassInit(void);
-timeDelta_t compassUpdate(timeUs_t currentTimeUs);
-bool compassIsReady(void);
+void compassUpdate(timeUs_t currentTimeUs);
 bool compassIsHealthy(void);
 bool compassIsCalibrationComplete(void);
 

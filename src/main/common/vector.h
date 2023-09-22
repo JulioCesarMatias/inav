@@ -43,6 +43,8 @@ typedef struct {
 void rotationMatrixFromEulerAngles(fpMatrix3_t * rmat, const fp_angles_t * angles);
 void rotationMatrixFromAxisAngle(fpMatrix3_t * rmat, const fpAxisAngle_t * a);
 fpVector3_t multiplyMatrixByVector(fpMatrix3_t m, fpVector3_t v);
+void matrixTransposed(fpMatrix3_t mIn, fpMatrix3_t *mOut);
+bool matrixInvert(fpMatrix3_t *inv);
 
 static inline void vectorZero(fpVector3_t * v)
 {

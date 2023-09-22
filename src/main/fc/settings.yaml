@@ -12,6 +12,12 @@ tables:
   - name: mag_hardware
     values: ["NONE", "AUTO", "HMC5883", "AK8975", "MAG3110", "AK8963", "IST8310", "QMC5883", "MPU9250", "IST8308", "LIS3MDL", "MSP", "RM3100", "VCM5883", "MLX90393", "FAKE"]
     enum: magSensor_e
+  - name: mag_external
+    values: ["INTERNAL", "EXTERNAL"]
+    enum: mag_external_e
+  - name: mag_cal_type
+    values: ["SAMPLES", "GPS"]
+    enum: magCalibrationType_e
   - name: opflow_hardware
     values: ["NONE", "CXOF", "MSP", "FAKE"]
     enum: opticalFlowSensor_e
@@ -489,7 +495,18 @@ groups:
       - name: mag_hardware
         description: "Selection of mag hardware. See Wiki Sensor auto detect and hardware failure detection for more info"
         default_value: "AUTO"
+        type: uint8_t
         table: mag_hardware
+      - name: mag_external
+        description: "Compass Internal = On FC. Compass External = On GPS"
+        default_value: "EXTERNAL"
+        type: uint8_t
+        table: mag_external
+      - name: mag_cal_type
+        description: "SAMPLES: Calibration using Samples, hold your UAV in the air, and rotate it in several directions, until the system obtains enough samples to complete the calibration. GPS: Calibration using GPS, leave your UAV stopped, click to start the compass calibration, and wait for the Off-Sets values to be calculated automatically based on GPS coordinates."
+        default_value: "SAMPLES"
+        type: uint8_t
+        table: mag_cal_type
       - name: mag_rotate_auto
         description: "0 = Disabled. 1 = CheckOnly: It just calculates the compass orientation automatically, but it doesn't save it. 2 = CheckAndFix: The external compass will have their orientation automatically corrected."
         default_value: 2
@@ -504,19 +521,19 @@ groups:
       - name: magoffset_x
         description: "Magnetometer calibration X offset. If its 0 none offset has been applied and calibration is failed."
         default_value: 0.0
-        field: OffSet.x
+        field: offSet.x
         min: -10000
         max: 100000
       - name: magoffset_y
         description: "Magnetometer calibration Y offset. If its 0 none offset has been applied and calibration is failed."
         default_value: 0.0
-        field: OffSet.y
+        field: offSet.y
         min: -10000
         max: 100000
       - name: magoffset_z
         description: "Magnetometer calibration Z offset. If its 0 none offset has been applied and calibration is failed."
         default_value: 0.0
-        field: OffSet.z
+        field: offSet.z
         min: -10000
         max: 100000
       - name: magscalefactor
@@ -528,37 +545,37 @@ groups:
       - name: magdiagonals_x
         description: "Magnetometer soft-iron diagonal X component"
         default_value: 1.0
-        field: Diagonals.x
+        field: diagonals.x
         min: -10000
         max: 100000
       - name: magdiagonals_y
         description: "Magnetometer soft-iron diagonal Y component"
         default_value: 1.0
-        field: Diagonals.y
+        field: diagonals.y
         min: -10000
         max: 100000
       - name: magdiagonals_z
         description: "Magnetometer soft-iron diagonal Z component"
         default_value: 1.0
-        field: Diagonals.z
+        field: diagonals.z
         min: -10000
         max: 100000
       - name: magoffdiagonals_x
         description: "Magnetometer soft-iron off-diagonal X component"
         default_value: 0.0
-        field: OffDiagonals.x
+        field: offDiagonals.x
         min: -10000
         max: 100000
       - name: magoffdiagonals_y
         description: "Magnetometer soft-iron off-diagonal Y component"
         default_value: 0.0
-        field: OffDiagonals.y
+        field: offDiagonals.y
         min: -10000
         max: 100000
       - name: magoffdiagonals_z
         description: "Magnetometer soft-iron off-diagonal Z component"
         default_value: 0.0
-        field: OffDiagonals.z
+        field: offDiagonals.z
         min: -10000
         max: 100000
       - name: mag_to_use
@@ -567,24 +584,6 @@ groups:
         min: 0
         max: 1
         default_value: 0
-      - name: align_mag_roll
-        description: "Set the external mag alignment on the roll axis (in 0.1 degree steps). If this value is non-zero, the compass is assumed to be externally mounted and both the board and on-board compass alignent (align_mag) are ignored. See also align_mag_pitch and align_mag_yaw."
-        default_value: 0
-        field: rollDeciDegrees
-        min: -1800
-        max: 3600
-      - name: align_mag_pitch
-        description: "Same as align_mag_roll, but for the pitch axis."
-        default_value: 0
-        field: pitchDeciDegrees
-        min: -1800
-        max: 3600
-      - name: align_mag_yaw
-        description: "Same as align_mag_roll, but for the yaw axis."
-        default_value: 0
-        field: yawDeciDegrees
-        min: -1800
-        max: 3600
 
   - name: PG_BAROMETER_CONFIG
     type: barometerConfig_t

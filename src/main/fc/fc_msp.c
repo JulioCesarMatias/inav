@@ -116,6 +116,7 @@
 #include "sensors/barometer.h"
 #include "sensors/pitotmeter.h"
 #include "sensors/compass.h"
+#include "sensors/compass_calibration.h"
 #include "sensors/gyro.h"
 #include "sensors/opflow.h"
 #include "sensors/temperature.h"
@@ -1330,28 +1331,63 @@ static bool mspFcProcessOutCommand(uint16_t cmdMSP, sbuf_t *dst, mspPostProcessF
         sbufWriteU16(dst, accelerometerConfig()->accGain.raw[Z]);
 
     #ifdef USE_MAG
-        sbufWriteU16(dst, compassConfig()->OffSet.x);
-        sbufWriteU16(dst, compassConfig()->OffSet.y);
-        sbufWriteU16(dst, compassConfig()->OffSet.z);
+
+        sbufWriteU16(dst, compassConfig()->offSet.x);
+        sbufWriteU16(dst, compassConfig()->offSet.y);
+        sbufWriteU16(dst, compassConfig()->offSet.z);
+
+        sbufWriteU16(dst, compassConfig()->diagonals.x);
+        sbufWriteU16(dst, compassConfig()->diagonals.y);
+        sbufWriteU16(dst, compassConfig()->diagonals.z);
+
+        sbufWriteU16(dst, compassConfig()->offDiagonals.x);
+        sbufWriteU16(dst, compassConfig()->offDiagonals.y);
+        sbufWriteU16(dst, compassConfig()->offDiagonals.z);
+
+        sbufWriteU16(dst, compassConfig()->scaleFactor);
+
+        const Report compassCalibrationReport = getCompassCalibrationReport();
+        const State compassCalibrationState = getCompassCalibrationState();
+
+        sbufWriteU16(dst, compassCalibrationReport.fitness);
+        sbufWriteU8(dst,  compassCalibrationState.attempt);
+        
+        sbufWriteU8(dst, compassCalibrationReport.status);
+        sbufWriteU8(dst, compassCalibrationState.fit_step);
+
+        sbufWriteU8(dst,  compassCalibrationReport.original_orientation);
+        sbufWriteU8(dst,  compassCalibrationReport.orientation);
+        sbufWriteU16(dst, compassCalibrationState.completion_pct);
+        sbufWriteU8(dst,  compassCalibrationState.calibration_finished);
+
     #else
+
         sbufWriteU16(dst, 0);
         sbufWriteU16(dst, 0);
         sbufWriteU16(dst, 0);
+
+        sbufWriteU16(dst, 0);
+        sbufWrite16(dst, 0);
+        sbufWrite16(dst, 0);
+
+        sbufWriteU16(dst, 0);
+        sbufWriteU16(dst, 0);
+        sbufWriteU16(dst, 0);
+
+        sbufWriteU16(dst, 0);
+
+        sbufWriteU16(dst, 0);
+        sbufWriteU8(dst, 0);
+        sbufWriteU8(dst, 0);
+        sbufWriteU8(dst, 0);
+        sbufWriteU16(dst, 0);
+        sbufWriteU8(dst, 0);
+        
     #endif
 
     #ifdef USE_OPFLOW
         sbufWriteU16(dst, opticalFlowConfig()->opflow_scale * 256);
     #else
-        sbufWriteU16(dst, 0);
-    #endif
-
-    #ifdef USE_MAG
-        sbufWriteU16(dst, 0);
-        sbufWriteU16(dst, 0);
-        sbufWriteU16(dst, 0);
-    #else
-        sbufWriteU16(dst, 0);
-        sbufWriteU16(dst, 0);
         sbufWriteU16(dst, 0);
     #endif
 
@@ -2295,7 +2331,7 @@ static mspResult_e mspFcProcessInCommand(uint16_t cmdMSP, sbuf_t *src)
         break;
 
     case MSP_SET_CALIBRATION_DATA:
-        if (dataSize >= 18) {
+        if (dataSize == 8) {
             accelerometerConfigMutable()->accZero.raw[X] = sbufReadU16(src);
             accelerometerConfigMutable()->accZero.raw[Y] = sbufReadU16(src);
             accelerometerConfigMutable()->accZero.raw[Z] = sbufReadU16(src);
@@ -2303,32 +2339,8 @@ static mspResult_e mspFcProcessInCommand(uint16_t cmdMSP, sbuf_t *src)
             accelerometerConfigMutable()->accGain.raw[Y] = sbufReadU16(src);
             accelerometerConfigMutable()->accGain.raw[Z] = sbufReadU16(src);
 
-#ifdef USE_MAG
-            compassConfigMutable()->OffSet.x = sbufReadU16(src);
-            compassConfigMutable()->OffSet.y = sbufReadU16(src);
-            compassConfigMutable()->OffSet.z = sbufReadU16(src);
-#else
-            sbufReadU16(src);
-            sbufReadU16(src);
-            sbufReadU16(src);
-#endif
 #ifdef USE_OPFLOW
-            if (dataSize >= 20) {
-                opticalFlowConfigMutable()->opflow_scale = sbufReadU16(src) / 256.0f;
-            }
-#endif
-#ifdef USE_MAG
-            if (dataSize >= 22) {
-                sbufReadU16(src);
-                sbufReadU16(src);
-                sbufReadU16(src);
-            }
-#else
-            if (dataSize >= 22) {
-                sbufReadU16(src);
-                sbufReadU16(src);
-                sbufReadU16(src);
-            }
+        opticalFlowConfigMutable()->opflow_scale = sbufReadU16(src) / 256.0f;
 #endif
         } else
             return MSP_RESULT_ERROR;

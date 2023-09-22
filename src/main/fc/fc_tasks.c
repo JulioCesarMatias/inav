@@ -178,10 +178,7 @@ void taskUpdateCompass(timeUs_t currentTimeUs)
         return;
     }
 
-    const timeDelta_t newDeadline = compassUpdate(currentTimeUs);
-    if (newDeadline != 0) {
-        rescheduleTask(TASK_SELF, newDeadline);
-    }
+    compassUpdate(currentTimeUs);
 }
 #endif
 
