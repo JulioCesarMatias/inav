@@ -26,12 +26,12 @@
 
 #define COMPASS_CAL_NUM_SPHERE_PARAMS 4
 #define COMPASS_CAL_NUM_ELLIPSOID_PARAMS 9
-#define COMPASS_CAL_NUM_SAMPLES 300 // number of samples required before fitting begins
+#define COMPASS_CAL_NUM_SAMPLES 300 // Number of samples required before fitting begins
 
-#define COMPASS_MAX_SCALE_FACTOR 1.5
-#define COMPASS_MIN_SCALE_FACTOR (1.0 / COMPASS_MAX_SCALE_FACTOR)
-#define COMPASS_CAL_SAMPLE_SCALE_TO_FIXED(__X) ((int16_t)constrainf(roundf(__X * 8.0f), INT16_MIN, INT16_MAX))
-#define COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(__X) (__X / 8.0f)
+#define COMPASS_MAX_SCALE_FACTOR 1.5f
+#define COMPASS_MIN_SCALE_FACTOR (1.0f / COMPASS_MAX_SCALE_FACTOR)
+#define COMPASS_CAL_SAMPLE_SCALE_TO_FIXED(__X) ((int16_t)constrainf(roundf((float)__X * 8.0f), (float)INT16_MIN, (float)INT16_MAX))
+#define COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(__X) ((float)__X / 8.0f)
 #define FIELD_RADIUS_MIN 150
 #define FIELD_RADIUS_MAX 950
 
@@ -57,8 +57,6 @@ typedef enum
 // results
 typedef struct
 {
-    float *radius_p;
-    float *offsetX_p;
     float radius;        // magnetic field strength calculated from samples
     fpVector3_t offset;  // offsets
     fpVector3_t diag;    // diagonal scaling
@@ -66,17 +64,19 @@ typedef struct
     float scale_factor;  // scaling factor to compensate for radius error
 } param_t;
 
-typedef union
+typedef struct
 {
-    struct
-    {
-        int8_t roll;
-        int8_t pitch;
-        int8_t yaw;
-    } att;
+    int8_t roll;
+    int8_t pitch;
+    int8_t yaw;
+} AttitudeSamples;
+
+typedef struct
+{
     int16_t x;
     int16_t y;
     int16_t z;
+    AttitudeSamples att;
 } CompassSample;
 
 typedef struct
@@ -123,7 +123,7 @@ void compassCalibrationStop(void);
 void compassCalibrationSetNewSample(const fpVector3_t sample);
 void compassCalibrationSetOrientation(sensor_align_e orientation, bool is_external, bool fix_orientation);
 bool compassIsCalibrating(void);
-void compassCalibrationUpdate(timeUs_t currentTimeUs);
+void compassCalibrationUpdate(void);
 Report getCompassCalibrationReport(void);
 State getCompassCalibrationState(void);
 void setCompassCalibrationFinished(bool state);

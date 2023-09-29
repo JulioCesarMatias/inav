@@ -245,6 +245,27 @@ float scaleRangef(float x, float srcMin, float srcMax, float destMin, float dest
     return ((a / b) + destMin);
 }
 
+fpMatrix3_t initMatrixUsingVector(float ax, float ay, float az,
+                                  float bx, float by, float bz,
+                                  float cx, float cy, float cz) 
+{
+    fpMatrix3_t matrix;
+
+    matrix.m[0][0] = ax;
+    matrix.m[0][1] = ay;
+    matrix.m[0][2] = az;
+
+    matrix.m[1][0] = bx;
+    matrix.m[1][1] = by;
+    matrix.m[1][2] = bz;
+
+    matrix.m[2][0] = cx;
+    matrix.m[2][1] = cy;
+    matrix.m[2][2] = cz;
+
+    return matrix;
+}
+
 // Build Rotation Matrix from Tait–Bryan angles (convention X1, Y2, Z3)
 void rotationMatrixFromEulerAngles(fpMatrix3_t * rmat, const fp_angles_t * angles)
 {
@@ -317,17 +338,18 @@ fpVector3_t multiplyMatrixByVector(fpMatrix3_t m, fpVector3_t v)
   return vRet;
 }
 
-void matrixTransposed(fpMatrix3_t mIn, fpMatrix3_t *mOut)
+// Function to transpose a Matrix3
+fpMatrix3_t matrixTransposed(const fpMatrix3_t matrix) 
 {
-  mOut->m[0][0] = mIn.m[0][0];
-  mOut->m[0][1] = mIn.m[1][0];
-  mOut->m[0][2] = mIn.m[2][0];
-  mOut->m[1][0] = mIn.m[0][1];
-  mOut->m[1][1] = mIn.m[1][1];
-  mOut->m[1][2] = mIn.m[2][1];
-  mOut->m[2][0] = mIn.m[0][2];
-  mOut->m[2][1] = mIn.m[1][2];
-  mOut->m[2][2] = mIn.m[2][2];
+    fpMatrix3_t result;
+
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            result.m[i][j] = matrix.m[j][i];
+        }
+    }
+
+    return result;
 }
 
 bool matrixInvert(fpMatrix3_t *inv)
@@ -814,18 +836,19 @@ bool matrix_inverse4x4(const float m[], float invOut[])
  */
 static float *matrix_multiply(const float *A, const float *B, uint16_t n)
 {
-    float *ret[n * n];
+    float* ret = (float*)malloc(n*n*sizeof(float));
+
     memset(ret, 0.0f, n * n * sizeof(float));
 
     for (uint16_t i = 0; i < n; i++) {
         for (uint16_t j = 0; j < n; j++) {
             for (uint16_t k = 0;k < n; k++) {
-                *ret[i * n + j] += A[i * n + k] * B[k * n + j];
+                ret[i * n + j] += A[i * n + k] * B[k * n + j];
             }
         }
     }
 
-    return *ret;
+    return ret;
 }
 
 static inline void swap(float *a, float *b)
@@ -908,7 +931,7 @@ static void matrix_LU_decompose(const float *A, float *L, float *U, float *P, ui
         }
     }
 
-    memset(APrime, 0, sizeof(float));
+    free(APrime);
 }
 
 /*
@@ -964,13 +987,18 @@ static void matrix_forward_sub(const float *L, float *out, uint16_t n)
  */
 bool matrix_inverseN(const float *A, float *inv, uint16_t n)
 {
-    float L[n * n], U[n * n], P[n * n];
+    float *L, *U, *P;
+
     bool ret = true;
+
+    L = (float*)malloc(n*n*sizeof(float));
+    U = (float*)malloc(n*n*sizeof(float));
+    P = (float*)malloc(n*n*sizeof(float));
 
     matrix_LU_decompose(A, L, U, P, n);
 
-    float L_inv[n * n];
-    float U_inv[n * n];
+    float* L_inv = (float*)malloc(n*n*sizeof(float));
+    float* U_inv = (float*)malloc(n*n*sizeof(float));
 
     memset(L_inv, 0, n * n * sizeof(float));
     matrix_forward_sub(L, L_inv, n);
@@ -979,8 +1007,8 @@ bool matrix_inverseN(const float *A, float *inv, uint16_t n)
     matrix_back_sub(U, U_inv, n);
 
     // decomposed matrices no longer required
-    memset(L, 0, sizeof(float));
-    memset(U, 0, sizeof(float));
+    free(L);
+    free(U);
 
     float *inv_unpivoted = matrix_multiply(U_inv, L_inv, n);
     float *inv_pivoted = matrix_multiply(inv_unpivoted, P, n);
@@ -996,11 +1024,11 @@ bool matrix_inverseN(const float *A, float *inv, uint16_t n)
 
     memcpy(inv, inv_pivoted, n * n * sizeof(float));
 
-    memset(inv_pivoted, 0, sizeof(float));
-    memset(inv_unpivoted, 0, sizeof(float));
-    memset(&P[0], 0, sizeof(float));
-    memset(&U_inv[0], 0, sizeof(float));
-    memset(&L_inv[0], 0, sizeof(float));
+    free(inv_pivoted);
+    free(inv_unpivoted);
+    free(P);
+    free(U_inv);
+    free(L_inv);
 
     return ret;
 }

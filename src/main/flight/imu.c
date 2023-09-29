@@ -265,7 +265,7 @@ static float imuGetPGainScaleFactor(void)
 
 static void imuResetOrientationQuaternion(const fpVector3_t * accBF)
 {
-    const float accNorm = fast_fsqrtf(vectorNormSquared(accBF));
+    const float accNorm = fast_fsqrtf(vectorLengthSquared(accBF));
 
     orientation.q0 = accBF->z + accNorm;
     orientation.q1 = accBF->y;
@@ -334,7 +334,7 @@ static void imuMahonyAHRSupdate(float dt, const fpVector3_t * gyroBF, const fpVe
     fpVector3_t vRotation = *gyroBF;
 
     /* Calculate general spin rate (rad/s) */
-    const float spin_rate_sq = vectorNormSquared(&vRotation);
+    const float spin_rate_sq = vectorLengthSquared(&vRotation);
 
     /* Step 1: Yaw correction */
     // Use measured magnetic field vector
@@ -343,7 +343,7 @@ static void imuMahonyAHRSupdate(float dt, const fpVector3_t * gyroBF, const fpVe
 
         fpVector3_t vErr = { .v = { 0.0f, 0.0f, 0.0f } };
 
-        if (magBF && vectorNormSquared(magBF) > 0.01f) {
+        if (magBF && vectorLengthSquared(magBF) > 0.01f) {
             fpVector3_t vMag;
 
             // For magnetometer correction we make an assumption that magnetic field is perpendicular to gravity (ignore Z-component in EF).
@@ -357,7 +357,7 @@ static void imuMahonyAHRSupdate(float dt, const fpVector3_t * gyroBF, const fpVe
             vMag.z = 0.0f;
 
             // We zeroed out vMag.z -  make sure the whole vector didn't go to zero
-            if (vectorNormSquared(&vMag) > 0.01f) {
+            if (vectorLengthSquared(&vMag) > 0.01f) {
                 // Normalize to unit vector
                 vectorNormalize(&vMag, &vMag);
 
@@ -404,7 +404,7 @@ static void imuMahonyAHRSupdate(float dt, const fpVector3_t * gyroBF, const fpVe
             vHeadingEF.z = 0.0f;
 
             // We zeroed out vHeadingEF.z -  make sure the whole vector didn't go to zero
-            if (vectorNormSquared(&vHeadingEF) > 0.01f) {
+            if (vectorLengthSquared(&vHeadingEF) > 0.01f) {
                 // Normalize to unit vector
                 vectorNormalize(&vHeadingEF, &vHeadingEF);
 
@@ -477,7 +477,7 @@ static void imuMahonyAHRSupdate(float dt, const fpVector3_t * gyroBF, const fpVe
 
     vectorScale(&vTheta, &vRotation, 0.5f * dt);
     quaternionInitFromVector(&deltaQ, &vTheta);
-    const float thetaMagnitudeSq = vectorNormSquared(&vTheta);
+    const float thetaMagnitudeSq = vectorLengthSquared(&vTheta);
 
     // If calculated rotation is zero - don't update quaternion
     if (thetaMagnitudeSq >= 1e-20f) {
@@ -539,7 +539,7 @@ static float imuCalculateAccelerometerWeightNearness(void)
 {
     fpVector3_t accBFNorm;
     vectorScale(&accBFNorm, &compansatedGravityBF, 1.0f / GRAVITY_CMSS);
-    const float accMagnitudeSq = vectorNormSquared(&accBFNorm);
+    const float accMagnitudeSq = vectorLengthSquared(&accBFNorm);
     const float accWeight_Nearness = bellCurve(fast_fsqrtf(accMagnitudeSq) - 1.0f, MAX_ACC_NEARNESS);
     return accWeight_Nearness;
 }
@@ -566,7 +566,7 @@ static float imuCalculateAccelerometerWeightRateIgnore(const float acc_ignore_sl
 
     if (ARMING_FLAG(ARMED) && imuConfig()->acc_ignore_rate)
     {
-        float rotRateMagnitude = fast_fsqrtf(vectorNormSquared(&imuMeasuredRotationBFFiltered));
+        float rotRateMagnitude = fast_fsqrtf(vectorLengthSquared(&imuMeasuredRotationBFFiltered));
         rotRateMagnitude = rotRateMagnitude / (acc_ignore_slope_multipiler + 0.001f);
         if (imuConfig()->acc_ignore_slope)
         {
@@ -721,11 +721,11 @@ static void imuCalculateEstimatedAttitude(float dT)
     {
         fpVector3_t compansatedGravityBF_velned;
         vectorAdd(&compansatedGravityBF_velned, &imuMeasuredAccelBF, &vEstcentrifugalAccelBF_velned);
-        float velned_magnitude = fabsf(fast_fsqrtf(vectorNormSquared(&compansatedGravityBF_velned)) - GRAVITY_CMSS);
+        float velned_magnitude = fabsf(fast_fsqrtf(vectorLengthSquared(&compansatedGravityBF_velned)) - GRAVITY_CMSS);
 
         fpVector3_t compansatedGravityBF_turnrate;
         vectorAdd(&compansatedGravityBF_turnrate, &imuMeasuredAccelBF, &vEstcentrifugalAccelBF_turnrate);
-        float turnrate_magnitude = fabsf(fast_fsqrtf(vectorNormSquared(&compansatedGravityBF_turnrate)) - GRAVITY_CMSS);
+        float turnrate_magnitude = fabsf(fast_fsqrtf(vectorLengthSquared(&compansatedGravityBF_turnrate)) - GRAVITY_CMSS);
         if (velned_magnitude > turnrate_magnitude)
         {
             compansatedGravityBF = compansatedGravityBF_turnrate;

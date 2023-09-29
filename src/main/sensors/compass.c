@@ -409,6 +409,14 @@ void compassUpdate(timeUs_t currentTimeUs)
         mag.magADC[axis] = mag.dev.magADCRaw[axis]; // int32_t copy to work with
     }
 
+    for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++)
+    {
+        mag.magADC[axis] *= 1000.0f / 3000.0f; // Apply the Magnetometer scale
+    }
+
+    applySensorAlignment(mag.magADC, mag.magADC, compassConfig()->mag_align);
+    applyBoardAlignment(mag.magADC);
+
     if (STATE(CALIBRATE_MAG))
     {
         beeper(BEEPER_ACTION_SUCCESS);
@@ -418,12 +426,12 @@ void compassUpdate(timeUs_t currentTimeUs)
         {
             if (!getCompassCalibrationFinished()) // Did the user click the cancel calibration button? Yes...
             {
-                compassCalibrationStop();
-                setCompassCalibrationFinished(true);
+                // compassCalibrationStop();
+                // setCompassCalibrationFinished(true);
                 return;
             }
 
-            // Internal compasses get twice the threshold. This is because internal compasses tend to be a lot noisier
+            // Internal compasses get twice the threshold. This is because internal compass tend to be a lot noisier
             if (compassConfig()->mag_external == MAG_INTERNAL)
             {
                 compassCalibrationStart(COMPASS_CALIBRATION_INIT_DELAY, COMPASS_OFFSETS_MAX_DEFAULT, COMPASS_CALIBRATION_FITNESS_DEFAULT * 2);
@@ -432,17 +440,21 @@ void compassUpdate(timeUs_t currentTimeUs)
             {
                 compassCalibrationStart(COMPASS_CALIBRATION_INIT_DELAY, COMPASS_OFFSETS_MAX_DEFAULT, COMPASS_CALIBRATION_FITNESS_DEFAULT);
             }
-            setCompassCalibrationFinished(false);
+
+            if (compassConfig()->mag_auto_rotate)
+            {
+                const bool isExternalCompass = compassConfig()->mag_external == MAG_EXTERNAL;
+                sensor_align_e rotation = isExternalCompass ? compassConfig()->mag_align : ALIGN_DEFAULT;
+                compassCalibrationSetOrientation(rotation, isExternalCompass, compassConfig()->mag_auto_rotate == 2);
+            }
         }
         else
         {
             yawShoted = atan2_approx(rotationMatrix.m[1][0], rotationMatrix.m[0][0]);
-            setCompassCalibrationFinished(false);
         }
-    }
 
-    applySensorAlignment(mag.magADC, mag.magADC, compassConfig()->mag_align);
-    applyBoardAlignment(mag.magADC);
+        setCompassCalibrationFinished(false); // Set false to init the calibration
+    }
 
     if (!getCompassCalibrationFinished() && compassConfig()->mag_cal_type == MAG_CALIBRATION_USING_SAMPLES)
     {
@@ -452,14 +464,7 @@ void compassUpdate(timeUs_t currentTimeUs)
 
         compassCalibrationSetNewSample(magSamples);
 
-        if (compassConfig()->mag_auto_rotate)
-        {
-            const bool isExternalCompass = compassConfig()->mag_external == MAG_EXTERNAL;
-            sensor_align_e rotation = isExternalCompass ? compassConfig()->mag_align : ALIGN_DEFAULT;
-            compassCalibrationSetOrientation(rotation, isExternalCompass, compassConfig()->mag_auto_rotate == 2);
-        }
-
-        compassCalibrationUpdate(currentTimeUs);
+        compassCalibrationUpdate();
 
         const Report cal_report = getCompassCalibrationReport();
 
@@ -500,9 +505,9 @@ void compassUpdate(timeUs_t currentTimeUs)
     fpVector3_t magCorrectField = {.v = {mag.magADC[X], mag.magADC[Y], mag.magADC[Z]}};
 
     // Add in the basic offsets
-    magCorrectField.x += offsets.x;
-    magCorrectField.y += offsets.y;
-    magCorrectField.z += offsets.z;
+    magCorrectField.x -= offsets.x;
+    magCorrectField.y -= offsets.y;
+    magCorrectField.z -= offsets.z;
 
     // Add in scale factor, use a wide sanity check. The calibrator uses a narrower check.
     if (magScaleFactor > COMPASS_MIN_SCALE_FACTOR && magScaleFactor < COMPASS_MAX_SCALE_FACTOR)
@@ -515,17 +520,9 @@ void compassUpdate(timeUs_t currentTimeUs)
     // Apply eliptical correction
     if (diagonals.x != 0.0f && diagonals.y != 0.0f && diagonals.z != 0.0f)
     {
-        fpMatrix3_t mat;
-
-        mat.m[0][0] = diagonals.x;
-        mat.m[0][1] = offdiagonals.x;
-        mat.m[0][2] = offdiagonals.y;
-        mat.m[1][0] = offdiagonals.x;
-        mat.m[1][1] = diagonals.y;
-        mat.m[1][2] = offdiagonals.z;
-        mat.m[2][0] = offdiagonals.y;
-        mat.m[2][1] = offdiagonals.z;
-        mat.m[2][2] = diagonals.z;
+        fpMatrix3_t mat = initMatrixUsingVector(diagonals.x, offdiagonals.x, offdiagonals.y,
+                                                offdiagonals.x, diagonals.y, offdiagonals.z,
+                                                offdiagonals.y, offdiagonals.z, diagonals.z);
 
         magCorrectField = multiplyMatrixByVector(mat, magCorrectField);
     }

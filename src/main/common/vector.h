@@ -43,7 +43,8 @@ typedef struct {
 void rotationMatrixFromEulerAngles(fpMatrix3_t * rmat, const fp_angles_t * angles);
 void rotationMatrixFromAxisAngle(fpMatrix3_t * rmat, const fpAxisAngle_t * a);
 fpVector3_t multiplyMatrixByVector(fpMatrix3_t m, fpVector3_t v);
-void matrixTransposed(fpMatrix3_t mIn, fpMatrix3_t *mOut);
+fpMatrix3_t initMatrixUsingVector(float ax, float ay, float az, float bx, float by, float bz, float cx, float cy, float cz);
+fpMatrix3_t matrixTransposed(const fpMatrix3_t matrix) ;
 bool matrixInvert(fpMatrix3_t *inv);
 
 static inline void vectorZero(fpVector3_t * v)
@@ -62,14 +63,14 @@ static inline void multiplicationTransposeMatrixByVector(const fpMatrix3_t mat, 
     vec->z = mat.m[0][2] * v.x + mat.m[1][2] * v.y + mat.m[2][2] * v.z;
 }
 
-static inline float vectorNormSquared(const fpVector3_t * v)
+static inline float vectorLengthSquared(const fpVector3_t * v)
 {
     return sq(v->x) + sq(v->y) + sq(v->z);
 }
 
 static inline fpVector3_t * vectorNormalize(fpVector3_t * result, const fpVector3_t * v)
 {
-    float length = fast_fsqrtf(vectorNormSquared(v));
+    float length = fast_fsqrtf(vectorLengthSquared(v));
     if (length != 0) {
         result->x = v->x / length;
         result->y = v->y / length;
@@ -138,19 +139,9 @@ static inline void vectorRotateInverse(fpVector3_t *vec, const sensor_align_e ro
     vectorRotate(&y_vec, rotation);
     vectorRotate(&z_vec, rotation);
 
-    fpMatrix3_t vecToMatrix;
-
-    vecToMatrix.m[0][0] = x_vec.x;
-    vecToMatrix.m[0][1] = x_vec.y;
-    vecToMatrix.m[0][2] = x_vec.z;
-
-    vecToMatrix.m[1][0] = y_vec.x;
-    vecToMatrix.m[1][1] = y_vec.y;
-    vecToMatrix.m[1][2] = y_vec.z;
-
-    vecToMatrix.m[2][0] = z_vec.x;
-    vecToMatrix.m[2][1] = z_vec.y;
-    vecToMatrix.m[2][2] = z_vec.z;
+    fpMatrix3_t vecToMatrix = initMatrixUsingVector(x_vec.x, y_vec.x, z_vec.x, 
+                                                    x_vec.y, y_vec.y, z_vec.y,
+                                                    x_vec.z, y_vec.z, z_vec.z);
 
     multiplicationTransposeMatrixByVector(vecToMatrix, vec);
 }

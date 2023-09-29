@@ -27,7 +27,8 @@
 #include "sensors/sensors.h"
 
 // Type of magnetometer used/detected
-typedef enum {
+typedef enum
+{
     MAG_NONE = 0,
     MAG_AUTODETECT,
     MAG_HMC5883,
@@ -47,17 +48,20 @@ typedef enum {
     MAG_MAX = MAG_FAKE
 } magSensor_e;
 
-typedef enum {
+typedef enum
+{
     MAG_INTERNAL = 0,
     MAG_EXTERNAL
 } mag_external_e;
 
-typedef enum {
+typedef enum
+{
     MAG_CALIBRATION_USING_SAMPLES = 0,
     MAG_CALIBRATION_USING_GPS
 } magCalibrationType_e;
 
-typedef struct mag_s {
+typedef struct mag_s
+{
     magDev_t dev;
     float magADC[XYZ_AXIS_COUNT];
     timeUs_t time;
@@ -68,12 +72,12 @@ extern mag_t mag;
 
 #ifdef USE_MAG
 
-typedef struct compassConfig_s {
-    int16_t mag_declination;                // Get your magnetic declination from here : http://magnetic-declination.com/
-                                            // For example, -6deg 37min, = -637 Japan, format is [sign]dddmm (degreesminutes) default is zero.
-    sensor_align_e mag_align;               // on-board mag alignment. Ignored if externally aligned via *DeciDegrees.
-    uint8_t mag_hardware;                   // Which mag hardware to use on boards with more than one device
-    uint8_t mag_external;   
+typedef struct compassConfig_s
+{
+    int16_t mag_declination;  // Get your magnetic declination from here : http://magnetic-declination.com/  For example, -6deg 37min, = -637 Japan, format is [sign]dddmm (degreesminutes) default is zero.
+    sensor_align_e mag_align; // on-board mag alignment. Ignored if externally aligned via *DeciDegrees.
+    uint8_t mag_hardware;     // Which mag hardware to use on boards with more than one device
+    uint8_t mag_external;
     uint8_t mag_auto_rotate;
     uint8_t mag_cal_type;
     fpVector3_t offSet;
