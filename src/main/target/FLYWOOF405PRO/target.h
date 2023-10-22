@@ -34,17 +34,17 @@
 #define SPI1_MOSI_PIN   	    PA7
 
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN       CW90_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_YAW_270
 #define MPU6000_CS_PIN          PB12
 #define MPU6000_SPI_BUS         BUS_SPI1
 
 #define USE_IMU_BMI270
-#define IMU_BMI270_ALIGN       CW180_DEG_FLIP
+#define IMU_BMI270_ALIGN       ALIGN_ROLL_180
 #define BMI270_CS_PIN          PB12
 #define BMI270_SPI_BUS         BUS_SPI1
 
 #define USE_IMU_ICM42605
-#define IMU_ICM42605_ALIGN      CW180_DEG_FLIP
+#define IMU_ICM42605_ALIGN      ALIGN_ROLL_180
 #define ICM42605_CS_PIN         PB12
 #define ICM42605_SPI_BUS        BUS_SPI1
 

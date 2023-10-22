@@ -49,12 +49,12 @@
 #define USE_IMU_MPU6000
 #define MPU6000_CS_PIN          PA4
 #define MPU6000_SPI_BUS         BUS_SPI1
-#define IMU_MPU6000_ALIGN       CW180_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_YAW_180
 
 #define USE_IMU_ICM20689
 #define ICM20689_CS_PIN         PA4
 #define ICM20689_SPI_BUS        BUS_SPI1
-#define IMU_ICM20689_ALIGN      CW180_DEG
+#define IMU_ICM20689_ALIGN      ALIGN_YAW_180
 
 // *************** Baro *****************************
 

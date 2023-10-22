@@ -27,7 +27,7 @@
 
 void targetConfiguration(void)
 {
-    compassConfigMutable()->mag_align = CW90_DEG;
+    compassConfigMutable()->mag_align = ALIGN_YAW_270;
 
     serialConfigMutable()->portConfigs[1].functionMask = FUNCTION_MSP;
     serialConfigMutable()->portConfigs[1].msp_baudrateIndex = BAUD_57600;

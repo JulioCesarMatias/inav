@@ -23,21 +23,21 @@
 #include "drivers/io_types.h"
 #include "drivers/bus.h"
 
-typedef enum {
-    ALIGN_DEFAULT = 0,                                      // driver-provided alignment
-    CW0_DEG,
-    CW90_DEG,
-    CW180_DEG,
-    CW270_DEG,
-    CW0_DEG_FLIP,
-    CW90_DEG_FLIP,
-    CW180_DEG_FLIP,
-    CW270_DEG_FLIP,
+typedef enum
+{
+    ALIGN_DEFAULT = 0,
+    ALIGN_ROLL_180,
+    ALIGN_ROLL_180_YAW_90,
+    ALIGN_ROLL_180_YAW_270,
+    ALIGN_PITCH_180,
+    ALIGN_YAW_90,
+    ALIGN_YAW_180,
+    ALIGN_YAW_270,
     ALIGN_ROTATION_MAX
 } sensor_align_e;
 
-typedef bool (*sensorInitFuncPtr)(void);                    // sensor init prototype
-typedef bool (*sensorReadFuncPtr)(int16_t *data);           // sensor read and align prototype
+typedef bool (*sensorInitFuncPtr)(void);          // sensor init prototype
+typedef bool (*sensorReadFuncPtr)(int16_t *data); // sensor read and align prototype
 typedef bool (*sensorInterruptFuncPtr)(void);
 struct accDev_s;
 typedef void (*sensorAccInitFuncPtr)(struct accDev_s *acc);

@@ -28,5 +28,5 @@
 
 void targetConfiguration(void)
 {
-    compassConfigMutable()->mag_align = CW0_DEG;
+    compassConfigMutable()->mag_align = ALIGN_DEFAULT;
 }

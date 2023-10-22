@@ -69,10 +69,10 @@
 
 #if defined(OMNIBUSF4PRO) || defined(OMNIBUSF4V3)
   #define USE_IMU_MPU6000
-  #define IMU_MPU6000_ALIGN       CW270_DEG
+  #define IMU_MPU6000_ALIGN       ALIGN_YAW_90
 #else
   #define USE_IMU_MPU6000
-  #define IMU_MPU6000_ALIGN       CW180_DEG
+  #define IMU_MPU6000_ALIGN       ALIGN_YAW_180
 #endif
 
 // Support for OMNIBUS F4 PRO CORNER - it has ICM20608 instead of MPU6000

@@ -39,10 +39,10 @@
 #define MPU9250_SPI_BUS         BUS_SPI1
 
 #define USE_IMU_MPU6500
-#define IMU_MPU6500_ALIGN       CW180_DEG
+#define IMU_MPU6500_ALIGN       ALIGN_YAW_180
 
 #define USE_IMU_MPU9250
-#define IMU_MPU9250_ALIGN       CW180_DEG
+#define IMU_MPU9250_ALIGN       ALIGN_YAW_180
 
 // *************** Compass *****************************
 #define USE_MAG

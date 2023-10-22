@@ -52,9 +52,9 @@
 #define TEMPERATURE_I2C_BUS     BUS_I2C3
 
 #ifdef QUANTON
-#define IMU_MPU6000_ALIGN       CW90_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_YAW_270
 #else
-#define IMU_MPU6000_ALIGN       CW270_DEG_FLIP
+#define IMU_MPU6000_ALIGN       ALIGN_ROLL_180_YAW_270
 #endif
 
 #define USE_BARO

@@ -23,7 +23,6 @@
 #include "platform.h"
 
 #include "common/maths.h"
-#include "common/vector.h"
 #include "common/axis.h"
 
 #include "config/parameter_group.h"
@@ -43,7 +42,7 @@
 
 #include "boardalignment.h"
 
-static bool standardBoardAlignment = true;     // board orientation correction
+static bool standardBoardAlignment = true; // board orientation correction
 static fpMatrix3_t boardRotMatrix;
 
 // no template required since defaults are zero
@@ -56,16 +55,19 @@ static bool isBoardAlignmentStandard(const boardAlignment_t *boardAlignment)
 
 void initBoardAlignment(void)
 {
-    if (isBoardAlignmentStandard(boardAlignment())) {
+    if (isBoardAlignmentStandard(boardAlignment()))
+    {
         standardBoardAlignment = true;
-    } else {
+    }
+    else
+    {
         fp_angles_t rotationAngles;
 
         standardBoardAlignment = false;
 
-        rotationAngles.angles.roll  = DECIDEGREES_TO_RADIANS(boardAlignment()->rollDeciDegrees );
+        rotationAngles.angles.roll = DECIDEGREES_TO_RADIANS(boardAlignment()->rollDeciDegrees);
         rotationAngles.angles.pitch = DECIDEGREES_TO_RADIANS(boardAlignment()->pitchDeciDegrees);
-        rotationAngles.angles.yaw   = DECIDEGREES_TO_RADIANS(boardAlignment()->yawDeciDegrees  );
+        rotationAngles.angles.yaw = DECIDEGREES_TO_RADIANS(boardAlignment()->yawDeciDegrees);
 
         rotationMatrixFromEulerAngles(&boardRotMatrix, &rotationAngles);
     }
@@ -85,68 +87,17 @@ void updateBoardAlignment(int16_t roll, int16_t pitch)
     initBoardAlignment();
 }
 
-void applyBoardAlignment(float *vec)
+void applyBoardAlignment(fpVector3_t *vec)
 {
-    if (standardBoardAlignment) {
+    if (standardBoardAlignment)
+    {
         return;
     }
 
-    fpVector3_t fpVec = { .v = { vec[X], vec[Y], vec[Z] } };
+    fpVector3_t fpVec = {.v = {vec->x, vec->y, vec->z}};
     multiplicationTransposeMatrixByVector(boardRotMatrix, &fpVec);
 
-    vec[X] = lrintf(fpVec.x);
-    vec[Y] = lrintf(fpVec.y);
-    vec[Z] = lrintf(fpVec.z);
-}
-
-void FAST_CODE applySensorAlignment(float * dest, float * src, uint8_t rotation)
-{
-    // Create a copy so we could use the same buffer for src & dest
-    const float x = src[X];
-    const float y = src[Y];
-    const float z = src[Z];
-
-    switch (rotation) {
-    default:
-    case CW0_DEG:
-        dest[X] = x;
-        dest[Y] = y;
-        dest[Z] = z;
-        break;
-    case CW90_DEG:
-        dest[X] = y;
-        dest[Y] = -x;
-        dest[Z] = z;
-        break;
-    case CW180_DEG:
-        dest[X] = -x;
-        dest[Y] = -y;
-        dest[Z] = z;
-        break;
-    case CW270_DEG:
-        dest[X] = -y;
-        dest[Y] = x;
-        dest[Z] = z;
-        break;
-    case CW0_DEG_FLIP:
-        dest[X] = -x;
-        dest[Y] = y;
-        dest[Z] = -z;
-        break;
-    case CW90_DEG_FLIP:
-        dest[X] = y;
-        dest[Y] = x;
-        dest[Z] = -z;
-        break;
-    case CW180_DEG_FLIP:
-        dest[X] = x;
-        dest[Y] = -y;
-        dest[Z] = -z;
-        break;
-    case CW270_DEG_FLIP:
-        dest[X] = -y;
-        dest[Y] = -x;
-        dest[Z] = -z;
-        break;
-    }
+    vec->x = lrintf(fpVec.x);
+    vec->y = lrintf(fpVec.y);
+    vec->z = lrintf(fpVec.z);
 }

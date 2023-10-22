@@ -32,12 +32,12 @@
 
 // ******* GYRO and ACC ********
 #define USE_IMU_MPU6500
-#define IMU_MPU6500_ALIGN               CW0_DEG
+#define IMU_MPU6500_ALIGN               ALIGN_DEFAULT
 #define MPU6500_SPI_BUS                 BUS_SPI1
 #define MPU6500_CS_PIN                  PA4
 
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN               CW270_DEG
+#define IMU_MPU6000_ALIGN               ALIGN_YAW_90
 #define MPU6000_SPI_BUS                 BUS_SPI1
 #define MPU6000_CS_PIN                  PA4
 

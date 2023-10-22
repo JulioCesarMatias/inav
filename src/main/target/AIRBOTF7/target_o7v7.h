@@ -36,7 +36,7 @@
 
 #define GYRO_0_CS_PIN           PD2
 #define GYRO_0_SPI_BUS          BUS_SPI3
-#define GYRO_0_ALIGN            CW0_DEG
+#define GYRO_0_ALIGN            ALIGN_DEFAULT
 
 // *************** FLASH **************************
 #define USE_FLASHFS

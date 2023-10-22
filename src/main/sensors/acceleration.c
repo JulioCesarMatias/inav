@@ -327,9 +327,15 @@ uint8_t accGetCalibrationAxisFlags(void)
 static int getPrimaryAxisIndex(float accADCData[3])
 {
     // Work on a copy so we don't mess with accADC data
-    float sample[3];
+    float sample[XYZ_AXIS_COUNT];
+    
+    fpVector3_t vec = {.v = {accADCData[X], accADCData[Y], accADCData[Z]}};
 
-    applySensorAlignment(sample, accADCData, acc.dev.accAlign);
+    vectorRotate(&vec, acc.dev.accAlign);
+
+    sample[X] = vec.x;
+    sample[Y] = vec.y;
+    sample[Z] = vec.z;
 
     // Tolerate up to atan(1 / 1.5) = 33 deg tilt (in worst case 66 deg separation between points)
     if ((ABS(sample[Z]) / 1.5f) > ABS(sample[X]) && (ABS(sample[Z]) / 1.5f) > ABS(sample[Y])) {
@@ -551,8 +557,14 @@ void accUpdate(void)
         applyAccelerationZero();  
     } 
 
-    applySensorAlignment(accADC, accADC, acc.dev.accAlign);
-    applyBoardAlignment(accADC);
+    fpVector3_t vec = {.v = {accADC[X], accADC[Y], accADC[Z]}};
+
+    vectorRotate(&vec, acc.dev.accAlign);
+    applyBoardAlignment(&vec);
+
+    accADC[X] = vec.x;
+    accADC[Y] = vec.y;
+    accADC[Z] = vec.z;
 
     // Calculate acceleration readings in G's
     for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++) {

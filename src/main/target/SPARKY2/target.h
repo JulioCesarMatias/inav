@@ -30,7 +30,7 @@
 #define BEEPER                  PC9
 
 #define USE_IMU_MPU9250
-#define IMU_MPU9250_ALIGN       CW270_DEG
+#define IMU_MPU9250_ALIGN       ALIGN_YAW_90
 
 #define MPU9250_SPI_BUS         BUS_SPI1
 #define MPU9250_CS_PIN          PC4

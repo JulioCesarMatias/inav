@@ -29,7 +29,7 @@
 #define MPU6500_SPI_BUS         BUS_SPI1
 
 #define USE_IMU_MPU6500
-#define IMU_MPU6500_ALIGN       CW270_DEG
+#define IMU_MPU6500_ALIGN       ALIGN_YAW_90
 
 #define USE_BARO
 #define BARO_I2C_BUS            BUS_I2C1

@@ -37,8 +37,8 @@
 #define USE_DUAL_GYRO
 
 #define USE_IMU_MPU6500
-#define IMU_0_ALIGN             CW0_DEG
-#define IMU_1_ALIGN             CW0_DEG
+#define IMU_0_ALIGN             ALIGN_DEFAULT
+#define IMU_1_ALIGN             ALIGN_DEFAULT
 
 #define MPU6500_0_CS_PIN        PA4
 #define MPU6500_0_SPI_BUS       BUS_SPI1

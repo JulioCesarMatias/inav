@@ -39,22 +39,22 @@
 
 #ifdef OMNIBUSF7V2
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN        CW0_DEG
+#define IMU_MPU6000_ALIGN        ALIGN_DEFAULT
 #define MPU6000_CS_PIN           SPI1_NSS_PIN
 #define MPU6000_SPI_BUS          BUS_SPI1
 
 #define USE_IMU_MPU6500
-#define IMU_MPU6500_ALIGN        CW90_DEG
+#define IMU_MPU6500_ALIGN        ALIGN_YAW_270
 #define MPU6500_CS_PIN           SPI3_NSS_PIN
 #define MPU6500_SPI_BUS          BUS_SPI3
 #else
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN        CW0_DEG
+#define IMU_MPU6000_ALIGN        ALIGN_DEFAULT
 #define MPU6000_CS_PIN           SPI3_NSS_PIN
 #define MPU6000_SPI_BUS          BUS_SPI3
 
 #define USE_IMU_MPU6500
-#define IMU_MPU6500_ALIGN        CW0_DEG
+#define IMU_MPU6500_ALIGN        ALIGN_DEFAULT
 #define MPU6500_CS_PIN           SPI1_NSS_PIN
 #define MPU6500_SPI_BUS          BUS_SPI1
 #endif

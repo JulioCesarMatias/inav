@@ -207,7 +207,13 @@ void opflowUpdate(timeUs_t currentTimeUs)
             const float integralToRateScaler = (opticalFlowConfig()->opflow_scale > 0.01f) ? (1.0e6f / opflow.dev.rawData.deltaTime) / (float)opticalFlowConfig()->opflow_scale : 0.0f;
 
             // Apply sensor alignment
-            applySensorAlignment(opflow.dev.rawData.flowRateRaw, opflow.dev.rawData.flowRateRaw, opticalFlowConfig()->opflow_align);
+            fpVector3_t vec = {.v = {opflow.dev.rawData.flowRateRaw[X], opflow.dev.rawData.flowRateRaw[Y], opflow.dev.rawData.flowRateRaw[Z]}};
+
+            vectorRotate(&vec, opticalFlowConfig()->opflow_align);
+
+            opflow.dev.rawData.flowRateRaw[X] = vec.x;
+            opflow.dev.rawData.flowRateRaw[Y] = vec.y;
+            opflow.dev.rawData.flowRateRaw[Z] = vec.z;
 
             // Calculate flow rate and accumulated body rate
             opflow.flowRate[X] = opflow.dev.rawData.flowRateRaw[X] * integralToRateScaler;

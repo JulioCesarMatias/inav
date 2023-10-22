@@ -60,7 +60,7 @@
 
 // *************** Gyro & ACC **********************
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN       CW0_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_DEFAULT
 
 #define USE_SPI
 #define USE_SPI_DEVICE_1

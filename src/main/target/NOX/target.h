@@ -44,7 +44,7 @@
 
 // *************** SPI Gyro & ACC **********************
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN       CW0_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_DEFAULT
 #define MPU6000_CS_PIN          PB12
 #define MPU6000_SPI_BUS         BUS_SPI2
 

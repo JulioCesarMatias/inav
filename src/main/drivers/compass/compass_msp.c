@@ -66,7 +66,13 @@ void mspMagReceiveNewData(uint8_t * bufferPtr)
     mspMagData[Y] = (float) pkt->magY;
     mspMagData[Z] = (float) pkt->magZ;
 
-    applySensorAlignment(mspMagData, mspMagData, CW90_DEG_FLIP);
+    fpVector3_t vec = {.v = {mspMagData[X], mspMagData[Y], mspMagData[Z]}};
+
+    vectorRotate(&vec, ALIGN_ROLL_180_YAW_90);
+
+    mspMagData[X] = vec.x;
+    mspMagData[Y] = vec.y;
+    mspMagData[Z] = vec.z;
 
     mspMagLastUpdateMs = millis();
 }

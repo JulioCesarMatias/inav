@@ -98,9 +98,9 @@ Settings cal_settings;
 status_e _status; // current state of calibrator
 
 // values provided by caller
-float _delay_start_sec;  // seconds to delay start of calibration (provided by caller)
-float _tolerance = 5.0f; // worst acceptable RMS tolerance (aka fitness).
-uint16_t _offset_max;    // maximum acceptable offsets (provided by caller)
+uint32_t _delay_start_us; // seconds to delay start of calibration (provided by caller)
+float _tolerance = 5.0f;  // worst acceptable RMS tolerance (aka fitness).
+uint16_t _offset_max;     // maximum acceptable offsets (provided by caller)
 
 // behavioral state
 uint32_t _start_time_us;       // system time start() function was last called
@@ -130,20 +130,20 @@ status_e _requested_status;
 bool _status_set_requested;
 bool _new_sample;
 
-static float calc_mean_squared_residuals(const param_t params);
-static bool set_status(status_e status);
+float calc_mean_squared_residuals(const param_t params);
+bool set_status(status_e status);
 
-static bool _running(void)
+bool _running(void)
 {
     return _status == RUNNING_STEP_ONE || _status == RUNNING_STEP_TWO;
 }
 
-static bool _fitting(void)
+bool _fitting(void)
 {
     return _running() && (_samples_collected == COMPASS_CAL_NUM_SAMPLES);
 }
 
-void compassCalibrationStart(float delay, uint16_t offset_max, float tolerance)
+void compassCalibrationStart(uint32_t delay, uint16_t offset_max, float tolerance)
 {
     // Don't do this while we are already started
     if (_running())
@@ -155,7 +155,7 @@ void compassCalibrationStart(float delay, uint16_t offset_max, float tolerance)
 
     cal_settings.offset_max = offset_max;
     cal_settings.attempt = 1;
-    cal_settings.delay_start_sec = delay;
+    cal_settings.delay_start_us = delay;
     cal_settings.start_time_ms = micros();
     cal_settings.tolerance = tolerance;
 
@@ -178,7 +178,7 @@ void compassCalibrationSetNewSample(const fpVector3_t sample)
     _last_sample.y = COMPASS_CAL_SAMPLE_SCALE_TO_FIXED(sample.y);
     _last_sample.z = COMPASS_CAL_SAMPLE_SCALE_TO_FIXED(sample.z);
     _last_sample.att.roll = constrain_int16(127 * (atan2_approx(rotationMatrix.m[2][1], rotationMatrix.m[2][2]) / M_PI), -127, 127);
-    _last_sample.att.pitch = constrain_int16(127 * (((0.5f * M_PIf) - acos_approx(-rotationMatrix.m[2][0])) / M_PI_2), -127, 127);
+    _last_sample.att.pitch = constrain_int16(127 * (asin_approx(-rotationMatrix.m[2][0]) / M_PI_2), -127, 127);
     _last_sample.att.yaw = constrain_int16(127 * (-atan2_approx(rotationMatrix.m[1][0], rotationMatrix.m[0][0]) / M_PI), -127, 127);
     _new_sample = true;
 }
@@ -228,7 +228,7 @@ bool compassIsCalibrating(void)
  * The above equation was proved after solving for spherical triangular excess
  * and related equations.
  */
-static bool accept_sample(const CompassSample sample, uint16_t skip_index)
+bool accept_sample(const CompassSample sample, uint16_t skip_index)
 {
     const uint16_t faces = (2 * COMPASS_CAL_NUM_SAMPLES - 4);
     const float a = (4.0f * M_PI / (3.0f * faces)) + M_PI / 3.0f;
@@ -258,7 +258,7 @@ static bool accept_sample(const CompassSample sample, uint16_t skip_index)
     return true;
 }
 
-static void thin_samples(void)
+void thin_samples(void)
 {
     if (_sample_buffer == NULL)
     {
@@ -289,7 +289,7 @@ static void thin_samples(void)
     }
 }
 
-static void pull_sample(void)
+void pull_sample(void)
 {
     CompassSample mag_sample;
 
@@ -313,7 +313,7 @@ static void pull_sample(void)
     }
 }
 
-static void update_cal_settings(void)
+void update_cal_settings(void)
 {
     _tolerance = cal_settings.tolerance;
     _check_orientation = cal_settings.check_orientation;
@@ -323,11 +323,11 @@ static void update_cal_settings(void)
     _fix_orientation = cal_settings.fix_orientation;
     _offset_max = cal_settings.offset_max;
     _attempt = cal_settings.attempt;
-    _delay_start_sec = cal_settings.delay_start_sec;
+    _delay_start_us = cal_settings.delay_start_us;
     _start_time_us = cal_settings.start_time_ms;
 }
 
-static void update_cal_status(void)
+void update_cal_status(void)
 {
     cal_state.status = _status;
     cal_state.attempt = _attempt;
@@ -362,13 +362,11 @@ static void update_cal_status(void)
     };
 }
 
-static void update_cal_report(void)
+void update_cal_report(void)
 {
     cal_report.status = _status;
-    cal_report.fitness = sqrtf(_fitness);
+    cal_report.fitness = fast_fsqrtf(_fitness);
     cal_report.ofs = _params.offset;
-    cal_report.diag = _params.diag;
-    cal_report.offdiag = _params.offdiag;
     cal_report.scale_factor = _params.scale_factor;
     cal_report.orientation_confidence = _orientation_confidence;
     cal_report.original_orientation = _orig_orientation;
@@ -397,7 +395,7 @@ bool getCompassCalibrationFinished(void)
 }
 
 // Initialize fitness before starting a fit
-static void initialize_fit(void)
+void initialize_fit(void)
 {
     if (_samples_collected != 0)
     {
@@ -414,7 +412,7 @@ static void initialize_fit(void)
     cal_state.fit_step = 0;
 }
 
-static void reset_state(void)
+void reset_state(void)
 {
     _samples_collected = 0;
     _samples_thinned = 0;
@@ -428,7 +426,7 @@ static void reset_state(void)
     initialize_fit();
 }
 
-static bool set_status(status_e status)
+bool set_status(status_e status)
 {
     if (status != NOT_STARTED && _status == status)
     {
@@ -460,14 +458,14 @@ static bool set_status(status_e status)
         }
 
         // On first attempt delay start if requested by caller
-        if (_attempt == 1 && (micros() - _start_time_us) < MS2US(_delay_start_sec))
+        if (_attempt == 1 && (micros() - _start_time_us) < MS2US(_delay_start_us))
         {
             return false;
         }
 
         if (_sample_buffer == NULL)
         {
-            _sample_buffer = (CompassSample *)calloc(COMPASS_CAL_NUM_SAMPLES, sizeof(CompassSample));
+            _sample_buffer = (CompassSample *)malloc(COMPASS_CAL_NUM_SAMPLES * sizeof(CompassSample));
         }
 
         if (_sample_buffer != NULL)
@@ -538,7 +536,7 @@ static bool set_status(status_e status)
     };
 }
 
-static bool fit_acceptable(void)
+bool fit_acceptable(void)
 {
     if (!isnan(_fitness) &&
         _params.radius > FIELD_RADIUS_MIN && _params.radius < FIELD_RADIUS_MAX &&
@@ -558,7 +556,7 @@ static bool fit_acceptable(void)
     return false;
 }
 
-static float calc_residual(const fpVector3_t sample, const param_t params)
+float calc_residual(const fpVector3_t sample, const param_t params)
 {
     fpMatrix3_t softiron = initMatrixUsingVector(params.diag.x, params.offdiag.x, params.offdiag.y,
                                                  params.offdiag.x, params.diag.y, params.offdiag.z,
@@ -570,8 +568,8 @@ static float calc_residual(const fpVector3_t sample, const param_t params)
     return params.radius - calc_length_pythagorean_3D(softIronBySample.x, softIronBySample.y, softIronBySample.z);
 }
 
-// Calc the fitness given a set of parameters (offsets, diagonals, off diagonals)
-static float calc_mean_squared_residuals(const param_t params)
+// Calc the fitness given a set of offsets
+float calc_mean_squared_residuals(const param_t params)
 {
     if (_sample_buffer == NULL || _samples_collected == 0)
     {
@@ -593,7 +591,7 @@ static float calc_mean_squared_residuals(const param_t params)
 }
 
 // Calculate initial offsets by simply taking the average values of the samples
-static void calc_initial_offset(void)
+void calc_initial_offset(void)
 {
     // Set initial offset to the average value of the samples
     vectorZero(&_params.offset);
@@ -610,19 +608,17 @@ static void calc_initial_offset(void)
     _params.offset.z /= _samples_collected;
 }
 
-static void calc_sphere_jacob(const fpVector3_t sample, const param_t params, float *ret)
+void calc_sphere_jacob(const fpVector3_t sample, const param_t params, float *ret)
 {
     const fpVector3_t offset = params.offset;
-    const fpVector3_t diag = params.diag;
-    const fpVector3_t offdiag = params.offdiag;
 
-    fpMatrix3_t softiron = initMatrixUsingVector(diag.x, offdiag.x, offdiag.y,
-                                                 offdiag.x, diag.y, offdiag.z,
-                                                 offdiag.y, offdiag.z, diag.z);
+    fpMatrix3_t softiron = initMatrixUsingVector(params.diag.x, params.offdiag.x, params.offdiag.y,
+                                                 params.offdiag.x, params.diag.y, params.offdiag.z,
+                                                 params.offdiag.y, params.offdiag.z, params.diag.z);
 
-    float A = (diag.x * (sample.x + offset.x)) + (offdiag.x * (sample.y + offset.y)) + (offdiag.y * (sample.z + offset.z));
-    float B = (offdiag.x * (sample.x + offset.x)) + (diag.y * (sample.y + offset.y)) + (offdiag.z * (sample.z + offset.z));
-    float C = (offdiag.y * (sample.x + offset.x)) + (offdiag.z * (sample.y + offset.y)) + (diag.z * (sample.z + offset.z));
+    float A = (params.diag.x * (sample.x + offset.x)) + (params.offdiag.x * (sample.y + offset.y)) + (params.offdiag.y * (sample.z + offset.z));
+    float B = (params.offdiag.x * (sample.x + offset.x)) + (params.diag.y * (sample.y + offset.y)) + (params.offdiag.z * (sample.z + offset.z));
+    float C = (params.offdiag.y * (sample.x + offset.x)) + (params.offdiag.z * (sample.y + offset.y)) + (params.diag.z * (sample.z + offset.z));
 
     fpVector3_t sampleSumByOffSet = {.v = {sample.x + offset.x, sample.y + offset.y, sample.z + offset.z}};
     fpVector3_t softIronBySample = multiplyMatrixByVector(softiron, sampleSumByOffSet);
@@ -631,24 +627,15 @@ static void calc_sphere_jacob(const fpVector3_t sample, const param_t params, fl
 
     // 0: partial derivative (radius wrt fitness fn) fn operated on sample
     ret[0] = 1.0f;
+
     // 1-3: partial derivative (offsets wrt fitness fn) fn operated on sample
-    ret[1] = -1.0f * (((diag.x * A) + (offdiag.x * B) + (offdiag.y * C)) / length);
-    ret[2] = -1.0f * (((offdiag.x * A) + (diag.y * B) + (offdiag.z * C)) / length);
-    ret[3] = -1.0f * (((offdiag.y * A) + (offdiag.z * B) + (diag.z * C)) / length);
+    ret[1] = -1.0f * (((params.diag.x * A) + (params.offdiag.x * B) + (params.offdiag.y * C)) / length);
+    ret[2] = -1.0f * (((params.offdiag.x * A) + (params.diag.y * B) + (params.offdiag.z * C)) / length);
+    ret[3] = -1.0f * (((params.offdiag.y * A) + (params.offdiag.z * B) + (params.diag.z * C)) / length);
 }
 
-float *get_sphere_params(param_t *param)
-{
-    return &(param->radius);
-}
-
-float *get_ellipsoid_params(param_t *param)
-{
-    return &(param->offset.x);
-}
-
-// run sphere fit to calculate diagonals and offdiagonals
-static void run_sphere_fit(void)
+// run sphere fit to calculate
+void run_sphere_fit(void)
 {
     if (_sample_buffer == NULL)
     {
@@ -659,9 +646,8 @@ static void run_sphere_fit(void)
 
     // take backup of fitness and parameters so we can determine later if this fit has improved the calibration
     float fitness = _fitness;
-    float fit1, fit2;
-    param_t fit1_params, fit2_params;
-    fit1_params = fit2_params = _params;
+    float fit1 = 0.0f;
+    float fit2 = 0.0f;
 
     float JTJ[COMPASS_CAL_NUM_SPHERE_PARAMS * COMPASS_CAL_NUM_SPHERE_PARAMS];
     float JTJ2[COMPASS_CAL_NUM_SPHERE_PARAMS * COMPASS_CAL_NUM_SPHERE_PARAMS];
@@ -674,7 +660,7 @@ static void run_sphere_fit(void)
 
         float sphere_jacob[COMPASS_CAL_NUM_SPHERE_PARAMS];
 
-        calc_sphere_jacob(sample, fit1_params, sphere_jacob);
+        calc_sphere_jacob(sample, _params, sphere_jacob);
 
         for (uint8_t i = 0; i < COMPASS_CAL_NUM_SPHERE_PARAMS; i++)
         {
@@ -685,12 +671,16 @@ static void run_sphere_fit(void)
                 JTJ2[i * COMPASS_CAL_NUM_SPHERE_PARAMS + j] += sphere_jacob[i] * sphere_jacob[j]; // A backup JTJ for LM
             }
             // Compute JTFI
-            JTFI[i] += sphere_jacob[i] * calc_residual(sample, fit1_params);
+            JTFI[i] += sphere_jacob[i] * calc_residual(sample, _params);
         }
     }
 
     //------------------------Levenberg-Marquardt-part-starts-here---------------------------------//
     // refer: http://en.wikipedia.org/wiki/Levenberg%E2%80%93Marquardt_algorithm#Choice_of_damping_parameter
+
+    float fit1_params[COMPASS_CAL_NUM_SPHERE_PARAMS] = {_params.radius, _params.offset.x, _params.offset.y, _params.offset.z};
+    float fit2_params[COMPASS_CAL_NUM_SPHERE_PARAMS];
+    memcpy(fit2_params, fit1_params, sizeof(fit1_params));
 
     for (uint8_t i = 0; i < COMPASS_CAL_NUM_SPHERE_PARAMS; i++)
     {
@@ -713,14 +703,24 @@ static void run_sphere_fit(void)
     {
         for (uint8_t col = 0; col < COMPASS_CAL_NUM_SPHERE_PARAMS; col++)
         {
-            get_sphere_params(&fit1_params)[row] -= JTFI[col] * JTJ[row * COMPASS_CAL_NUM_SPHERE_PARAMS + col];
-            get_sphere_params(&fit2_params)[row] -= JTFI[col] * JTJ2[row * COMPASS_CAL_NUM_SPHERE_PARAMS + col];
+            fit1_params[row] -= JTFI[col] * JTJ[row * COMPASS_CAL_NUM_SPHERE_PARAMS + col];
+            fit2_params[row] -= JTFI[col] * JTJ2[row * COMPASS_CAL_NUM_SPHERE_PARAMS + col];
         }
     }
 
     // Calculate fitness of two possible sets of parameters
-    fit1 = calc_mean_squared_residuals(fit1_params);
-    fit2 = calc_mean_squared_residuals(fit2_params);
+    param_t copyFitParam1;
+    param_t copyFitParam2;
+    copyFitParam1.radius = fit1_params[0];
+    copyFitParam1.offset.x = fit1_params[1];
+    copyFitParam1.offset.y = fit1_params[2];
+    copyFitParam1.offset.z = fit1_params[3];
+    copyFitParam2.radius = fit2_params[0];
+    copyFitParam2.offset.x = fit2_params[1];
+    copyFitParam2.offset.y = fit2_params[2];
+    copyFitParam2.offset.z = fit2_params[3];
+    fit1 = calc_mean_squared_residuals(copyFitParam1);
+    fit2 = calc_mean_squared_residuals(copyFitParam2);
 
     // Decide which of the two sets of parameters is best and store in fit1_params
     if (fit1 > _fitness && fit2 > _fitness)
@@ -732,7 +732,7 @@ static void run_sphere_fit(void)
     {
         // If fit2 was better we will use it. decrease lambda
         _sphere_lambda /= lma_damping;
-        fit1_params = fit2_params;
+        memcpy(fit1_params, fit2_params, sizeof(fit1_params));
         fitness = fit2;
     }
     else if (fit1 < _fitness)
@@ -746,23 +746,24 @@ static void run_sphere_fit(void)
     if (!isnan(fitness) && fitness < _fitness)
     {
         _fitness = fitness;
-        _params = fit1_params;
+        _params.radius = fit1_params[0];
+        _params.offset.x = fit1_params[1];
+        _params.offset.y = fit1_params[2];
+        _params.offset.z = fit1_params[3];
     }
 }
 
-static void calc_ellipsoid_jacob(const fpVector3_t sample, const param_t params, float *ret)
+void calc_ellipsoid_jacob(const fpVector3_t sample, const param_t params, float *ret)
 {
     const fpVector3_t offset = params.offset;
-    const fpVector3_t diag = params.diag;
-    const fpVector3_t offdiag = params.offdiag;
 
-    fpMatrix3_t softiron = initMatrixUsingVector(diag.x, offdiag.x, offdiag.y,
-                                                 offdiag.x, diag.y, offdiag.z,
-                                                 offdiag.y, offdiag.z, diag.z);
+    fpMatrix3_t softiron = initMatrixUsingVector(params.diag.x, params.offdiag.x, params.offdiag.y,
+                                                 params.offdiag.x, params.diag.y, params.offdiag.z,
+                                                 params.offdiag.y, params.offdiag.z, params.diag.z);
 
-    float A = (diag.x * (sample.x + offset.x)) + (offdiag.x * (sample.y + offset.y)) + (offdiag.y * (sample.z + offset.z));
-    float B = (offdiag.x * (sample.x + offset.x)) + (diag.y * (sample.y + offset.y)) + (offdiag.z * (sample.z + offset.z));
-    float C = (offdiag.y * (sample.x + offset.x)) + (offdiag.z * (sample.y + offset.y)) + (diag.z * (sample.z + offset.z));
+    float A = (params.diag.x * (sample.x + offset.x)) + (params.offdiag.x * (sample.y + offset.y)) + (params.offdiag.y * (sample.z + offset.z));
+    float B = (params.offdiag.x * (sample.x + offset.x)) + (params.diag.y * (sample.y + offset.y)) + (params.offdiag.z * (sample.z + offset.z));
+    float C = (params.offdiag.y * (sample.x + offset.x)) + (params.offdiag.z * (sample.y + offset.y)) + (params.diag.z * (sample.z + offset.z));
 
     fpVector3_t sampleSumByOffSet = {.v = {sample.x + offset.x, sample.y + offset.y, sample.z + offset.z}};
     fpVector3_t softIronBySample = multiplyMatrixByVector(softiron, sampleSumByOffSet);
@@ -770,9 +771,9 @@ static void calc_ellipsoid_jacob(const fpVector3_t sample, const param_t params,
     float length = calc_length_pythagorean_3D(softIronBySample.x, softIronBySample.y, softIronBySample.z);
 
     // 0-2: partial derivative (offset wrt fitness fn) fn operated on sample
-    ret[0] = -1.0f * (((diag.x * A) + (offdiag.x * B) + (offdiag.y * C)) / length);
-    ret[1] = -1.0f * (((offdiag.x * A) + (diag.y * B) + (offdiag.z * C)) / length);
-    ret[2] = -1.0f * (((offdiag.y * A) + (offdiag.z * B) + (diag.z * C)) / length);
+    ret[0] = -1.0f * (((params.diag.x * A) + (params.offdiag.x * B) + (params.offdiag.y * C)) / length);
+    ret[1] = -1.0f * (((params.offdiag.x * A) + (params.diag.y * B) + (params.offdiag.z * C)) / length);
+    ret[2] = -1.0f * (((params.offdiag.y * A) + (params.offdiag.z * B) + (params.diag.z * C)) / length);
 
     // 3-5: partial derivative (diag offset wrt fitness fn) fn operated on sample
     ret[3] = -1.0f * ((sample.x + offset.x) * A) / length;
@@ -785,7 +786,7 @@ static void calc_ellipsoid_jacob(const fpVector3_t sample, const param_t params,
     ret[8] = -1.0f * (((sample.z + offset.z) * B) + ((sample.y + offset.y) * C)) / length;
 }
 
-static void run_ellipsoid_fit(void)
+void run_ellipsoid_fit(void)
 {
     if (_sample_buffer == NULL)
     {
@@ -796,9 +797,8 @@ static void run_ellipsoid_fit(void)
 
     // Take backup of fitness and parameters so we can determine later if this fit has improved the calibration
     float fitness = _fitness;
-    float fit1, fit2;
-    param_t fit1_params, fit2_params;
-    fit1_params = fit2_params = _params;
+    float fit1 = 0.0f;
+    float fit2 = 0.0f;
 
     float JTJ[COMPASS_CAL_NUM_ELLIPSOID_PARAMS * COMPASS_CAL_NUM_ELLIPSOID_PARAMS];
     float JTJ2[COMPASS_CAL_NUM_ELLIPSOID_PARAMS * COMPASS_CAL_NUM_ELLIPSOID_PARAMS];
@@ -811,7 +811,7 @@ static void run_ellipsoid_fit(void)
 
         float ellipsoid_jacob[COMPASS_CAL_NUM_ELLIPSOID_PARAMS];
 
-        calc_ellipsoid_jacob(sample, fit1_params, ellipsoid_jacob);
+        calc_ellipsoid_jacob(sample, _params, ellipsoid_jacob);
 
         for (uint8_t i = 0; i < COMPASS_CAL_NUM_ELLIPSOID_PARAMS; i++)
         {
@@ -822,12 +822,15 @@ static void run_ellipsoid_fit(void)
                 JTJ2[i * COMPASS_CAL_NUM_ELLIPSOID_PARAMS + j] += ellipsoid_jacob[i] * ellipsoid_jacob[j];
             }
             // compute JTFI
-            JTFI[i] += ellipsoid_jacob[i] * calc_residual(sample, fit1_params);
+            JTFI[i] += ellipsoid_jacob[i] * calc_residual(sample, _params);
         }
     }
 
     //------------------------Levenberg-Marquardt-part-starts-here---------------------------------//
     // refer: http://en.wikipedia.org/wiki/Levenberg%E2%80%93Marquardt_algorithm#Choice_of_damping_parameter
+    float fit1_params[COMPASS_CAL_NUM_ELLIPSOID_PARAMS] = {_params.offset.x, _params.offset.y, _params.offset.z, _params.diag.x, _params.diag.y, _params.diag.z, _params.offdiag.x, _params.offdiag.y, _params.offdiag.z};
+    float fit2_params[COMPASS_CAL_NUM_ELLIPSOID_PARAMS];
+    memcpy(fit2_params, fit1_params, sizeof(fit1_params));
 
     for (uint8_t i = 0; i < COMPASS_CAL_NUM_ELLIPSOID_PARAMS; i++)
     {
@@ -850,14 +853,22 @@ static void run_ellipsoid_fit(void)
     {
         for (uint8_t col = 0; col < COMPASS_CAL_NUM_ELLIPSOID_PARAMS; col++)
         {
-            get_ellipsoid_params(&fit1_params)[row] -= JTFI[col] * JTJ[row * COMPASS_CAL_NUM_ELLIPSOID_PARAMS + col];
-            get_ellipsoid_params(&fit2_params)[row] -= JTFI[col] * JTJ2[row * COMPASS_CAL_NUM_ELLIPSOID_PARAMS + col];
+            fit1_params[row] -= JTFI[col] * JTJ[row * COMPASS_CAL_NUM_ELLIPSOID_PARAMS + col];
+            fit2_params[row] -= JTFI[col] * JTJ2[row * COMPASS_CAL_NUM_ELLIPSOID_PARAMS + col];
         }
     }
 
     // Calculate fitness of two possible sets of parameters
-    fit1 = calc_mean_squared_residuals(fit1_params);
-    fit2 = calc_mean_squared_residuals(fit2_params);
+    param_t copyFitParam1;
+    param_t copyFitParam2;
+    copyFitParam1.offset.x = fit1_params[0];
+    copyFitParam1.offset.y = fit1_params[1];
+    copyFitParam1.offset.z = fit1_params[2];
+    copyFitParam2.offset.x = fit2_params[0];
+    copyFitParam2.offset.y = fit2_params[1];
+    copyFitParam2.offset.z = fit2_params[2];
+    fit1 = calc_mean_squared_residuals(copyFitParam1);
+    fit2 = calc_mean_squared_residuals(copyFitParam2);
 
     // Decide which of the two sets of parameters is best and store in fit1_params
     if (fit1 > _fitness && fit2 > _fitness)
@@ -869,7 +880,7 @@ static void run_ellipsoid_fit(void)
     {
         // If fit2 was better we will use it. decrease lambda
         _ellipsoid_lambda /= lma_damping;
-        fit1_params = fit2_params;
+        memcpy(fit1_params, fit2_params, sizeof(fit1_params));
         fitness = fit2;
     }
     else if (fit1 < _fitness)
@@ -883,37 +894,30 @@ static void run_ellipsoid_fit(void)
     if (fitness < _fitness)
     {
         _fitness = fitness;
-        _params = fit1_params;
+        _params.offset.x = fit1_params[0];
+        _params.offset.y = fit1_params[1];
+        _params.offset.z = fit1_params[2];
+        _params.diag.x = fit1_params[3];
+        _params.diag.y = fit1_params[4];
+        _params.diag.z = fit1_params[5];
+        _params.offdiag.x = fit1_params[6];
+        _params.offdiag.y = fit1_params[7];
+        _params.offdiag.z = fit1_params[8];
     }
 }
 
-static fpMatrix3_t getRotationMatrixFromAHRS(const CompassSample sample)
-{
-    fpMatrix3_t ahrsMatrix;
-    fp_angles_t euler_rad;
-
-    euler_rad.angles.roll = sample.att.roll * (M_PI / 127);
-    euler_rad.angles.pitch = sample.att.pitch * (M_PI_2 / 127);
-    euler_rad.angles.yaw = sample.att.yaw * (M_PI / 127);
-
-    rotationMatrixFromEulerAngles(&ahrsMatrix, &euler_rad);
-
-    return ahrsMatrix;
-}
-
-static bool verifyForRightAngleRotation(const sensor_align_e r)
+bool verifyForRightAngleRotation(const sensor_align_e r)
 {
     switch (r)
     {
     case ALIGN_DEFAULT:
-    case CW0_DEG:
-    case CW90_DEG:
-    case CW180_DEG:
-    case CW270_DEG:
-    case CW0_DEG_FLIP:
-    case CW90_DEG_FLIP:
-    case CW180_DEG_FLIP:
-    case CW270_DEG_FLIP:
+    case ALIGN_ROLL_180:
+    case ALIGN_ROLL_180_YAW_90:
+    case ALIGN_ROLL_180_YAW_270:
+    case ALIGN_PITCH_180:
+    case ALIGN_YAW_90:
+    case ALIGN_YAW_180:
+    case ALIGN_YAW_270:
         return true;
 
     default:
@@ -932,7 +936,7 @@ static bool verifyForRightAngleRotation(const sensor_align_e r)
   Note that this earth field uses an arbitrary north reference, so it
   may not match the true earth field.
  */
-static fpVector3_t calculate_earth_field(const CompassSample sample, sensor_align_e r)
+fpVector3_t calculate_earth_field(const CompassSample sample, sensor_align_e r)
 {
     fpVector3_t v = {.v = {COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(sample.x), COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(sample.y), COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(sample.z)}};
 
@@ -944,6 +948,7 @@ static fpVector3_t calculate_earth_field(const CompassSample sample, sensor_alig
 
     // Apply offsets, rotating them for the orientation we are testing
     fpVector3_t rot_offsets = _params.offset;
+
     vectorRotateInverse(&rot_offsets, _orientation);
 
     vectorRotate(&rot_offsets, r);
@@ -953,15 +958,22 @@ static fpVector3_t calculate_earth_field(const CompassSample sample, sensor_alig
     v.z += rot_offsets.z;
 
     // Rotate the sample from body frame back to earth frame
-    fpMatrix3_t rot = getRotationMatrixFromAHRS(sample);
+    fpMatrix3_t rot;
+    fp_angles_t euler_rad;
+
+    euler_rad.angles.roll = sample.att.roll * (M_PI / 127);
+    euler_rad.angles.pitch = sample.att.pitch * (M_PI_2 / 127);
+    euler_rad.angles.yaw = sample.att.yaw * (M_PI / 127);
+
+    rotationMatrixFromEulerAngles(&rot, &euler_rad);
 
     fpVector3_t efield = multiplyMatrixByVector(rot, v);
 
     // Earth field is the mag sample in earth frame
     return efield;
 }
-
-static bool rotation_equal(sensor_align_e r1, sensor_align_e r2)
+/*
+bool rotation_equal(sensor_align_e r1, sensor_align_e r2)
 {
     if (r1 == r2)
     {
@@ -979,7 +991,7 @@ static bool rotation_equal(sensor_align_e r1, sensor_align_e r2)
 }
 
 // Calculate compass orientation using the attitude estimate associated with each sample, and fix orientation on external compasses if the feature is enabled
-static bool calculate_orientation(void)
+bool calculate_orientation(void)
 {
     if (!_check_orientation)
     {
@@ -987,14 +999,14 @@ static bool calculate_orientation(void)
         return true;
     }
 
-    float variance[ALIGN_ROTATION_MAX];
+    float variance[ALIGN_ROTATION_MAX] = {};
 
     _orientation_solution = _orientation;
 
     for (sensor_align_e r = ALIGN_DEFAULT; r < ALIGN_ROTATION_MAX; r++)
     {
         // Calculate the average implied earth field across all samples
-        fpVector3_t total_ef;
+        fpVector3_t total_ef = {.v = {0.0f, 0.0f, 0.0f}};
 
         for (uint16_t i = 0; i < _samples_collected; i++)
         {
@@ -1010,8 +1022,8 @@ static bool calculate_orientation(void)
         for (uint16_t i = 0; i < _samples_collected; i++)
         {
             fpVector3_t efield = calculate_earth_field(_sample_buffer[i], r);
-            fpVector3_t vecSubtraction = {.v = {efield.x - avg_efield.x, efield.y - avg_efield.y, efield.z - avg_efield.z}};
-            float err = vectorLengthSquared(&vecSubtraction);
+            fpVector3_t vecDiff = {.v = {efield.x - avg_efield.x, efield.y - avg_efield.y, efield.z - avg_efield.z}};
+            float err = vectorLengthSquared(&vecDiff);
             // Divide by number of samples collected to get the variance
             variance[r] += err / _samples_collected;
         }
@@ -1045,7 +1057,16 @@ static bool calculate_orientation(void)
 
     _orientation_confidence = second_best / bestv;
 
-    bool pass;
+    DEBUG_SET(DEBUG_CRUISE, 0, variance[0] * 100);
+    DEBUG_SET(DEBUG_CRUISE, 1, variance[1] * 100);
+    DEBUG_SET(DEBUG_CRUISE, 2, variance[2] * 100);
+    DEBUG_SET(DEBUG_CRUISE, 3, variance[3] * 100);
+    DEBUG_SET(DEBUG_CRUISE, 4, variance[4] * 100);
+    DEBUG_SET(DEBUG_CRUISE, 5, variance[5] * 100);
+    DEBUG_SET(DEBUG_CRUISE, 6, variance[6] * 100);
+    DEBUG_SET(DEBUG_CRUISE, 7, variance[7] * 100);
+
+    bool pass = false;
 
     if (besti == _orientation)
     {
@@ -1055,208 +1076,6 @@ static bool calculate_orientation(void)
     else
     {
         pass = _orientation_confidence > 2.0f; // Consider this a pass if the best orientation is 2x better variance than 2nd best
-    }
-
-    if (!pass)
-    {
-        // GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Mag(%u) bad orientation: %u/%u %.1f", _compass_idx, besti, besti2, (double)_orientation_confidence); (void)besti2;
-    }
-    else if (besti == _orientation)
-    {
-        // no orientation change
-        // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Mag(%u) good orientation: %u %.1f", _compass_idx, besti, (double)_orientation_confidence);
-    }
-    else if (!_is_external || !_fix_orientation)
-    {
-        // GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Mag(%u) internal bad orientation: %u %.1f", _compass_idx, besti, (double)_orientation_confidence);
-    }
-    else
-    {
-        // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Mag(%u) new orientation: %u was %u %.1f", _compass_idx, besti, _orientation, (double)_orientation_confidence);
-    }
-
-    if (!pass)
-    {
-        set_status(BAD_ORIENTATION);
-        return false;
-    }
-
-    if (_orientation == besti)
-    {
-        // No orientation change
-        return true;
-    }
-
-    if (!_is_external || !_fix_orientation)
-    {
-        // We won't change the orientation, but we set _orientation for reporting purposes
-        _orientation = besti;
-        _orientation_solution = besti;
-        set_status(BAD_ORIENTATION);
-        return false;
-    }
-
-    // Correct the offsets for the new orientation
-    fpVector3_t rot_offsets = _params.offset;
-    vectorRotateInverse(&rot_offsets, _orientation);
-    vectorRotate(&rot_offsets, besti);
-    _params.offset = rot_offsets;
-
-    // Rotate the samples for the new orientation
-    for (uint16_t i = 0; i < _samples_collected; i++)
-    {
-        fpVector3_t s = {.v = {COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(_sample_buffer[i].x), COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(_sample_buffer[i].y), COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(_sample_buffer[i].z)}};
-        vectorRotateInverse(&s, _orientation);
-        vectorRotate(&s, besti);
-        _sample_buffer[i].x = COMPASS_CAL_SAMPLE_SCALE_TO_FIXED(s.x);
-        _sample_buffer[i].y = COMPASS_CAL_SAMPLE_SCALE_TO_FIXED(s.y);
-        _sample_buffer[i].z = COMPASS_CAL_SAMPLE_SCALE_TO_FIXED(s.z);
-    }
-
-    _orientation = besti;
-    _orientation_solution = besti;
-
-    // Re-run the fit to get the diagonals and off-diagonals for the new orientation
-    initialize_fit();
-    run_sphere_fit();
-    run_ellipsoid_fit();
-
-    return fit_acceptable();
-}
-
-#include "build/debug.h"
-/*
-// Calculate compass orientation using the attitude estimate associated with each sample, and fix orientation on external compasses if the feature is enabled
-static bool calculate_orientation(void)
-{
-    if (!_check_orientation)
-    {
-        // We are not checking orientation
-        return true;
-    }
-
-    delay(1000);
-
-    DEBUG_SET(DEBUG_CRUISE, 4, 1000);
-
-    float variance[ALIGN_ROTATION_MAX];
-
-    _orientation_solution = _orientation;
-
-    for (uint8_t n = 0; n < ARRAYLEN(variance); n++)
-    {
-        sensor_align_e r = (sensor_align_e)n;
-
-        // Calculate the average implied earth field across all samples
-        fpVector3_t total_ef;
-
-        for (uint16_t i = 0; i < _samples_collected; i++)
-        {
-            DEBUG_SET(DEBUG_CRUISE, 0, i);
-            fpVector3_t efield = calculate_earth_field(_sample_buffer[i], r);
-            total_ef.x += efield.x;
-            total_ef.y += efield.y;
-            total_ef.z += efield.z;
-        }
-
-        fpVector3_t avg_efield = {.v = {total_ef.x / _samples_collected, total_ef.y / _samples_collected, total_ef.z / _samples_collected}};
-
-        // Now calculate the square error for this rotation against the average earth field
-        for (uint16_t i = 0; i < _samples_collected; i++)
-        {
-            DEBUG_SET(DEBUG_CRUISE, 1, i);
-            fpVector3_t efield = calculate_earth_field(_sample_buffer[i], r);
-            float err = sq(efield.x - avg_efield.x) + sq(efield.y - avg_efield.y) + sq(efield.z - avg_efield.z);
-            // Divide by number of samples collected to get the variance
-            variance[n] += err / _samples_collected;
-        }
-    }
-
-    // Find the rotation with the lowest variance
-    sensor_align_e besti = ALIGN_DEFAULT;
-    sensor_align_e besti_90 = ALIGN_DEFAULT;
-    float bestv = variance[0];
-    float bestv_90 = variance[0];
-
-    for (uint8_t n = 0; n < ARRAYLEN(variance); n++)
-    {
-        sensor_align_e r = (sensor_align_e)n;
-        if (variance[n] < bestv)
-        {
-            bestv = variance[n];
-            besti = r;
-        }
-
-        if (verifyForRightAngleRotation(r) && variance[n] < bestv_90)
-        {
-            bestv_90 = variance[n];
-            besti_90 = r;
-        }
-    }
-
-    float second_best = besti == ALIGN_DEFAULT ? variance[1] : variance[0];
-    float second_best_90 = besti_90 == ALIGN_DEFAULT ? variance[2] : variance[0];
-
-    for (uint8_t n = 0; n < ARRAYLEN(variance); n++)
-    {
-        sensor_align_e r = (sensor_align_e)n;
-        if (besti != r)
-        {
-            if (variance[n] < second_best)
-            {
-                second_best = variance[n];
-            }
-        }
-
-        if (verifyForRightAngleRotation(r) && (besti_90 != r) && (variance[n] < second_best_90))
-        {
-            second_best_90 = variance[n];
-        }
-    }
-
-    _orientation_confidence = second_best / bestv;
-
-    bool pass;
-
-    if (besti == _orientation) // If the orientation matched then allow for a low threshold
-    {
-        pass = true;
-    }
-    else
-    {
-        if (_orientation_confidence > 4.0f)
-        {
-            // Very confident, always pass
-            pass = true;
-        }
-        else
-        {
-            // Just consider 90's
-            _orientation_confidence = second_best_90 / bestv_90;
-            pass = _orientation_confidence > 2.0f;
-            besti = besti_90;
-        }
-    }
-    if (!pass)
-    {
-        // GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Mag(%u) bad orientation: %u/%u %.1f", _compass_idx,besti, besti2, (double)_orientation_confidence);
-        DEBUG_SET(DEBUG_CRUISE, 2, 1);
-    }
-    else if (besti == _orientation)
-    {
-        // no orientation change
-        // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Mag(%u) good orientation: %u %.1f", _compass_idx, besti, (double)_orientation_confidence);
-        DEBUG_SET(DEBUG_CRUISE, 2, 2);
-    }
-    else if (!_is_external || !_fix_orientation)
-    {
-        // GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Mag(%u) internal bad orientation: %u %.1f", _compass_idx, besti, (double)_orientation_confidence);
-        DEBUG_SET(DEBUG_CRUISE, 2, 3);
-    }
-    else
-    {
-        // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Mag(%u) new orientation: %u was %u %.1f", _compass_idx, besti, _orientation, (double)_orientation_confidence);
-        DEBUG_SET(DEBUG_CRUISE, 2, 4);
     }
 
     if (!pass)
@@ -1308,8 +1127,196 @@ static bool calculate_orientation(void)
     return fit_acceptable();
 }
 */
+
+// Calculate compass orientation using the attitude estimate associated with each sample, and fix orientation on external compasses if the feature is enabled
+bool calculate_orientation(void)
+{
+    if (!_check_orientation)
+    {
+        // We are not checking orientation
+        return true;
+    }
+
+    float variance[ALIGN_ROTATION_MAX];
+
+    _orientation_solution = _orientation;
+
+    for (uint8_t n = 0; n < ARRAYLEN(variance); n++)
+    {
+        sensor_align_e r = (sensor_align_e)n;
+
+        // Calculate the average implied earth field across all samples
+        fpVector3_t total_ef = {.v = {0.0f, 0.0f, 0.0f}};
+
+        for (uint16_t i = 0; i < _samples_collected; i++)
+        {
+            fpVector3_t efield = calculate_earth_field(_sample_buffer[i], r);
+            total_ef.x += efield.x;
+            total_ef.y += efield.y;
+            total_ef.z += efield.z;
+        }
+
+        fpVector3_t avg_efield = {.v = {total_ef.x / _samples_collected, total_ef.y / _samples_collected, total_ef.z / _samples_collected}};
+
+        // Now calculate the square error for this rotation against the average earth field
+        for (uint16_t i = 0; i < _samples_collected; i++)
+        {
+            fpVector3_t efield = calculate_earth_field(_sample_buffer[i], r);
+            fpVector3_t vecDiff = {.v = {efield.x - avg_efield.x, efield.y - avg_efield.y, efield.z - avg_efield.z}};
+            float err = vectorLengthSquared(&vecDiff);
+            // Divide by number of samples collected to get the variance
+            variance[n] += err / _samples_collected;
+        }
+    }
+
+    // Find the rotation with the lowest variance
+    sensor_align_e besti = ALIGN_DEFAULT;
+    sensor_align_e besti_90 = ALIGN_DEFAULT;
+    float bestv = variance[0];
+    float bestv_90 = variance[0];
+
+    for (uint8_t n = 0; n < ARRAYLEN(variance); n++)
+    {
+        sensor_align_e r = (sensor_align_e)n;
+        if (variance[n] < bestv)
+        {
+            bestv = variance[n];
+            besti = r;
+        }
+
+        if (verifyForRightAngleRotation(r) && variance[n] < bestv_90)
+        {
+            bestv_90 = variance[n];
+            besti_90 = r;
+        }
+    }
+
+    float second_best = besti == ALIGN_DEFAULT ? variance[1] : variance[0];
+    float second_best_90 = besti_90 == ALIGN_DEFAULT ? variance[2] : variance[0];
+
+    for (uint8_t n = 0; n < ARRAYLEN(variance); n++)
+    {
+        sensor_align_e r = (sensor_align_e)n;
+        if (besti != r)
+        {
+            if (variance[n] < second_best)
+            {
+                second_best = variance[n];
+            }
+        }
+
+        if (verifyForRightAngleRotation(r) && (besti_90 != r) && (variance[n] < second_best_90))
+        {
+            second_best_90 = variance[n];
+        }
+    }
+
+    _orientation_confidence = second_best / bestv;
+
+    DEBUG_SET(DEBUG_CRUISE, 0, variance[0]);
+    DEBUG_SET(DEBUG_CRUISE, 1, variance[1]);
+    DEBUG_SET(DEBUG_CRUISE, 2, variance[2]);
+    DEBUG_SET(DEBUG_CRUISE, 3, variance[3]);
+    DEBUG_SET(DEBUG_CRUISE, 4, variance[4]);
+    DEBUG_SET(DEBUG_CRUISE, 5, variance[5]);
+    DEBUG_SET(DEBUG_CRUISE, 6, variance[6]);
+    DEBUG_SET(DEBUG_CRUISE, 7, variance[7]);
+
+    bool pass;
+
+    if (besti == _orientation) // If the orientation matched then allow for a low threshold
+    {
+        pass = true;
+    }
+    else
+    {
+        if (_orientation_confidence > 4.0f)
+        {
+            // Very confident, always pass
+            pass = true;
+        }
+        else
+        {
+            // Just consider 90's
+            _orientation_confidence = second_best_90 / bestv_90;
+            pass = _orientation_confidence > 2.0f;
+            besti = besti_90;
+        }
+    }
+
+    if (!pass)
+    {
+        // GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Mag(%u) bad orientation: %u/%u %.1f", _compass_idx,besti, besti2, (double)_orientation_confidence);
+        // DEBUG_SET(DEBUG_CRUISE, 2, 1);
+    }
+    else if (besti == _orientation)
+    {
+        // no orientation change
+        // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Mag(%u) good orientation: %u %.1f", _compass_idx, besti, (double)_orientation_confidence);
+        // DEBUG_SET(DEBUG_CRUISE, 2, 2);
+    }
+    else if (!_is_external || !_fix_orientation)
+    {
+        // GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Mag(%u) internal bad orientation: %u %.1f", _compass_idx, besti, (double)_orientation_confidence);
+        // DEBUG_SET(DEBUG_CRUISE, 2, 3);
+    }
+    else
+    {
+        // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Mag(%u) new orientation: %u was %u %.1f", _compass_idx, besti, _orientation, (double)_orientation_confidence);
+        // DEBUG_SET(DEBUG_CRUISE, 2, 4);
+    }
+
+    if (!pass)
+    {
+        set_status(BAD_ORIENTATION);
+        return false;
+    }
+
+    if (_orientation == besti)
+    {
+        // No orientation change
+        return true;
+    }
+
+    if (!_is_external || !_fix_orientation)
+    {
+        // We won't change the orientation, but we set _orientation for reporting purposes
+        _orientation = besti;
+        _orientation_solution = besti;
+        set_status(BAD_ORIENTATION);
+        return false;
+    }
+
+    // Correct the offsets for the new orientation
+    fpVector3_t rot_offsets = _params.offset;
+    vectorRotateInverse(&rot_offsets, _orientation);
+    vectorRotate(&rot_offsets, besti);
+    _params.offset = rot_offsets;
+
+    // Rotate the samples for the new orientation
+    for (uint16_t i = 0; i < _samples_collected; i++)
+    {
+        fpVector3_t s = {.v = {COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(_sample_buffer[i].x), COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(_sample_buffer[i].y), COMPASS_CAL_SAMPLE_SCALE_TO_FLOAT(_sample_buffer[i].z)}};
+        vectorRotateInverse(&s, _orientation);
+        vectorRotate(&s, besti);
+        _sample_buffer[i].x = COMPASS_CAL_SAMPLE_SCALE_TO_FIXED(s.x);
+        _sample_buffer[i].y = COMPASS_CAL_SAMPLE_SCALE_TO_FIXED(s.y);
+        _sample_buffer[i].z = COMPASS_CAL_SAMPLE_SCALE_TO_FIXED(s.z);
+    }
+
+    _orientation = besti;
+    _orientation_solution = besti;
+
+    // Re-run the fit for the new orientation
+    initialize_fit();
+    run_sphere_fit();
+    run_ellipsoid_fit();
+
+    return fit_acceptable();
+}
+
 // Fix radius of the fit to compensate for sensor scale factor errors return false if radius is outside acceptable range
-static bool fix_radius(void)
+bool fix_radius(void)
 {
     if (!isGPSTrustworthy())
     {
@@ -1396,10 +1403,8 @@ void compassCalibrationUpdate(void)
     {
         if (cal_state.fit_step >= 35)
         {
-            if (fit_acceptable() && fix_radius())
+            if (fit_acceptable() && fix_radius() && calculate_orientation())
             {
-                bool oriok = calculate_orientation();
-                DEBUG_SET(DEBUG_CRUISE, 0, oriok);
                 set_status(COMPASS_CAL_SUCCESS);
             }
             else
@@ -1420,50 +1425,20 @@ void compassCalibrationUpdate(void)
     }
 }
 
-// Get mag field with the effects of offsets, diagonals and off-diagonals removed
-static bool getUncorrectedField(fpVector3_t *field, fpVector3_t offsets, fpVector3_t diagonals, fpVector3_t offdiagonals)
-{
-    // Get corrected field
-    fpVector3_t correctedField = *field;
-
-    // Form eliptical correction matrix and invert it. This is needed to remove the effects of the eliptical correction when calculating new offsets
-    if (diagonals.x != 0.0f && diagonals.y != 0.0f && diagonals.z != 0.0f)
-    {
-        fpMatrix3_t mat = initMatrixUsingVector(diagonals.x, offdiagonals.x, offdiagonals.y,
-                                                offdiagonals.x, diagonals.y, offdiagonals.z,
-                                                offdiagonals.y, offdiagonals.z, diagonals.z);
-
-        if (!matrixInvert(&mat))
-        {
-            return false;
-        }
-
-        // Remove impact of diagonals and off-diagonals
-        *field = multiplyMatrixByVector(mat, correctedField);
-    }
-
-    // Remove impact of offsets
-    field->x -= offsets.x;
-    field->y -= offsets.y;
-    field->z -= offsets.z;
-
-    return true;
-}
-
 /*
   Fast compass calibration given vehicle position and yaw.
-  This results in zero diagonal and off-diagonal elements, so is only suitable for vehicles where the field is close to spherical. It is useful for large vehicles where moving the vehicle to calibrate it is difficult.
+  It is useful for large vehicles where moving the vehicle to calibrate it is difficult.
   The offsets of the selected compasses are set to values to bring them into consistency with the intensity, declination and inclination tables at the given latitude and longitude.
   This assumes that the compass is correctly scaled in milliGauss
 */
-bool CompassCalibrationFixedYaw(float yaw_value, fpVector3_t magfield, fpVector3_t *offsets, fpVector3_t *diagonals, fpVector3_t *offdiagonals)
+bool compassCalibrationQuick(float yaw_value, fpVector3_t magfield, fpVector3_t *offsets)
 {
     if (!isGPSTrustworthy())
     {
         return false;
     }
 
-    gpsLocation_t newLLH = {gpsSol.llh.lat, gpsSol.llh.lon, gpsSol.llh.alt};
+    gpsLocation_t newLLH = {.lat = gpsSol.llh.lat, .lon = gpsSol.llh.lon, .alt = gpsSol.llh.alt};
 
     // Get the magnetic field intensity and orientation
     float intensity;
@@ -1485,8 +1460,8 @@ bool CompassCalibrationFixedYaw(float yaw_value, fpVector3_t magfield, fpVector3
 
     fpMatrix3_t ahrs;
     fp_angles_t ahrsAngles = {.angles.roll = atan2_approx(rotationMatrix.m[2][1], rotationMatrix.m[2][2]),
-                              .angles.pitch = ((0.5f * M_PIf) - acos_approx(-rotationMatrix.m[2][0])),
-                              .angles.yaw = -yaw_value};
+                              .angles.pitch = asin_approx(-rotationMatrix.m[2][0]),
+                              .angles.yaw = yaw_value};
 
     rotationMatrixFromEulerAngles(&ahrs, &ahrsAngles);
 
@@ -1496,22 +1471,14 @@ bool CompassCalibrationFixedYaw(float yaw_value, fpVector3_t magfield, fpVector3
 
     fpVector3_t measurement = magfield;
 
-    if (!getUncorrectedField(&measurement, *offsets, *diagonals, *offdiagonals))
-    {
-        return false;
-    }
+    // Remove impact of offsets
+    measurement.x -= offsets->x;
+    measurement.y -= offsets->y;
+    measurement.z -= offsets->z;
 
     offsets->x = field.x - measurement.x;
     offsets->y = field.y - measurement.y;
     offsets->z = field.z - measurement.z;
-
-    diagonals->x = 1.0f;
-    diagonals->y = 1.0f;
-    diagonals->z = 1.0f;
-
-    offdiagonals->x = 0.0f;
-    offdiagonals->y = 0.0f;
-    offdiagonals->z = 0.0f;
 
     return true;
 }

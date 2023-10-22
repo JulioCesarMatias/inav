@@ -26,7 +26,7 @@
 
 void targetConfiguration(void)
 {
-    compassConfigMutable()->mag_align = CW0_DEG_FLIP;
+    compassConfigMutable()->mag_align = ALIGN_PITCH_180;
     serialConfigMutable()->portConfigs[findSerialPortIndexByIdentifier(SERIAL_PORT_USART4)].functionMask = FUNCTION_GPS;
     // serialConfigMutable()->portConfigs[findSerialPortIndexByIdentifier(SERIAL_PORT_USART4)].gps_baudrateIndex = BAUD_115200;
     beeperConfigMutable()->pwmMode = true;

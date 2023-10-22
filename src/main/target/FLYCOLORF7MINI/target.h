@@ -36,7 +36,7 @@
 #define SPI1_MOSI_PIN           PA7
 
 #define USE_IMU_MPU6500
-#define IMU_MPU6500_ALIGN       CW180_DEG_FLIP
+#define IMU_MPU6500_ALIGN       ALIGN_ROLL_180
 #define MPU6500_CS_PIN          PA4
 #define MPU6500_SPI_BUS         BUS_SPI1
 

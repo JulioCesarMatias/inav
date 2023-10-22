@@ -249,7 +249,7 @@ void validateAndFixConfig(void)
 
 #ifdef USE_MAG
     if (compassConfig()->mag_align == ALIGN_DEFAULT) {
-        compassConfigMutable()->mag_align = CW270_DEG_FLIP;
+        compassConfigMutable()->mag_align = ALIGN_ROLL_180_YAW_270;
     }
 #endif
 

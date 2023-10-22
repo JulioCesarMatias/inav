@@ -81,18 +81,40 @@ PG_RESET_TEMPLATE(compassConfig_t, compassConfig,
                   .offSet.y = SETTING_MAGOFFSET_Y_DEFAULT,
                   .offSet.z = SETTING_MAGOFFSET_Z_DEFAULT,
                   .scaleFactor = SETTING_MAGSCALEFACTOR_DEFAULT,
-                  .diagonals.x = SETTING_MAGDIAGONALS_X_DEFAULT,
-                  .diagonals.y = SETTING_MAGDIAGONALS_Y_DEFAULT,
-                  .diagonals.z = SETTING_MAGDIAGONALS_Z_DEFAULT,
-                  .offDiagonals.x = SETTING_MAGOFFDIAGONALS_X_DEFAULT,
-                  .offDiagonals.y = SETTING_MAGOFFDIAGONALS_Y_DEFAULT,
-                  .offDiagonals.z = SETTING_MAGOFFDIAGONALS_Z_DEFAULT,
 #ifdef USE_DUAL_MAG
                   .mag_to_use = SETTING_MAG_TO_USE_DEFAULT,
 #endif
 );
 
 static float yawShoted;
+
+bool compassInit(void)
+{
+#ifdef USE_DUAL_MAG
+    mag.dev.magSensorToUse = compassConfig()->mag_to_use;
+#else
+    mag.dev.magSensorToUse = 0;
+#endif
+
+    if (!compassDetect(&mag.dev, compassConfig()->mag_hardware))
+    {
+        return false;
+    }
+
+    // initialize and calibration. turn on led during mag calibration (calibration routine blinks it)
+    LED1_ON;
+    const bool ret = mag.dev.init(&mag.dev);
+    LED1_OFF;
+
+    if (!ret)
+    {
+        sensorsClear(SENSOR_MAG);
+    }
+
+    setCompassCalibrationFinished(true);
+
+    return ret;
+}
 
 bool compassDetect(magDev_t *dev, magSensor_e magHardwareToUse)
 {
@@ -328,51 +350,10 @@ bool compassDetect(magDev_t *dev, magSensor_e magHardwareToUse)
     return true;
 }
 
-bool compassInit(void)
-{
-#ifdef USE_DUAL_MAG
-    mag.dev.magSensorToUse = compassConfig()->mag_to_use;
-#else
-    mag.dev.magSensorToUse = 0;
-#endif
-
-    if (!compassDetect(&mag.dev, compassConfig()->mag_hardware))
-    {
-        return false;
-    }
-
-    // initialize and calibration. turn on led during mag calibration (calibration routine blinks it)
-    LED1_ON;
-    const bool ret = mag.dev.init(&mag.dev);
-    LED1_OFF;
-
-    if (!ret)
-    {
-        sensorsClear(SENSOR_MAG);
-    }
-
-    setCompassCalibrationFinished(true);
-
-    return ret;
-}
-
-bool compassIsHealthy(void)
-{
-    return (mag.time - mag.lastUpdateUs < MS2US(500));
-}
-
-bool compassIsCalibrationComplete(void)
-{
-    if (STATE(COMPASS_CALIBRATED))
-    {
-        return true;
-    }
-
-    return false;
-}
-
 void compassUpdate(timeUs_t currentTimeUs)
 {
+    UNUSED(currentTimeUs);
+
 #ifdef USE_SIMULATOR
     if (ARMING_FLAG(SIMULATOR_MODE_HITL))
     {
@@ -394,8 +375,6 @@ void compassUpdate(timeUs_t currentTimeUs)
     }
 #endif
 
-    mag.time = currentTimeUs;
-
     if (!mag.dev.read(&mag.dev))
     {
         mag.magADC[X] = 0.0f;
@@ -403,19 +382,6 @@ void compassUpdate(timeUs_t currentTimeUs)
         mag.magADC[Z] = 0.0f;
         return;
     }
-
-    for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++)
-    {
-        mag.magADC[axis] = mag.dev.magADCRaw[axis]; // int32_t copy to work with
-    }
-
-    for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++)
-    {
-        mag.magADC[axis] *= 1000.0f / 3000.0f; // Apply the Magnetometer scale
-    }
-
-    applySensorAlignment(mag.magADC, mag.magADC, compassConfig()->mag_align);
-    applyBoardAlignment(mag.magADC);
 
     if (STATE(CALIBRATE_MAG))
     {
@@ -456,11 +422,35 @@ void compassUpdate(timeUs_t currentTimeUs)
         setCompassCalibrationFinished(false); // Set false to init the calibration
     }
 
+    for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++)
+    {
+        mag.magADC[axis] = mag.dev.magADCRaw[axis]; // int16_t copy to work with float
+        mag.magADC[axis] *= 1000.0f / 3000.0f;      // Apply the Magnetometer scale
+    }
+
+    fpVector3_t magSamples = {.v = {mag.magADC[X], mag.magADC[Y], mag.magADC[Z]}};
+    const fpVector3_t offsets = {.v = {compassConfig()->offSet.x, compassConfig()->offSet.y, compassConfig()->offSet.z}};
+    const float magScaleFactor = compassConfig()->scaleFactor;
+
+    vectorRotate(&magSamples, compassConfig()->mag_align);
+    applyBoardAlignment(&magSamples);
+
+    // Add in the basic offsets
+    magSamples.x -= offsets.x;
+    magSamples.y -= offsets.y;
+    magSamples.z -= offsets.z;
+
+    // Add in scale factor, use a wide sanity check. The calibrator uses a narrower check.
+    if (magScaleFactor > COMPASS_MIN_SCALE_FACTOR && magScaleFactor < COMPASS_MAX_SCALE_FACTOR)
+    {
+        magSamples.x *= magScaleFactor;
+        magSamples.y *= magScaleFactor;
+        magSamples.z *= magScaleFactor;
+    }
+
     if (!getCompassCalibrationFinished() && compassConfig()->mag_cal_type == MAG_CALIBRATION_USING_SAMPLES)
     {
         LED0_TOGGLE;
-
-        fpVector3_t magSamples = {.v = {mag.magADC[X], mag.magADC[Y], mag.magADC[Z]}};
 
         compassCalibrationSetNewSample(magSamples);
 
@@ -473,14 +463,6 @@ void compassUpdate(timeUs_t currentTimeUs)
             compassConfigMutable()->offSet.x = cal_report.ofs.x;
             compassConfigMutable()->offSet.y = cal_report.ofs.y;
             compassConfigMutable()->offSet.z = cal_report.ofs.z;
-
-            compassConfigMutable()->diagonals.x = cal_report.diag.x;
-            compassConfigMutable()->diagonals.y = cal_report.diag.y;
-            compassConfigMutable()->diagonals.z = cal_report.diag.z;
-
-            compassConfigMutable()->offDiagonals.x = cal_report.offdiag.x;
-            compassConfigMutable()->offDiagonals.y = cal_report.offdiag.y;
-            compassConfigMutable()->offDiagonals.z = cal_report.offdiag.z;
 
             compassConfigMutable()->scaleFactor = cal_report.scale_factor;
 
@@ -497,54 +479,42 @@ void compassUpdate(timeUs_t currentTimeUs)
         }
     }
 
-    const fpVector3_t offsets = {.v = {compassConfig()->offSet.x, compassConfig()->offSet.y, compassConfig()->offSet.z}};
-    const fpVector3_t diagonals = {.v = {compassConfig()->diagonals.x, compassConfig()->diagonals.y, compassConfig()->diagonals.z}};
-    const fpVector3_t offdiagonals = {.v = {compassConfig()->offDiagonals.x, compassConfig()->offDiagonals.y, compassConfig()->offDiagonals.z}};
-    const float magScaleFactor = compassConfig()->scaleFactor;
-
-    fpVector3_t magCorrectField = {.v = {mag.magADC[X], mag.magADC[Y], mag.magADC[Z]}};
-
-    // Add in the basic offsets
-    magCorrectField.x -= offsets.x;
-    magCorrectField.y -= offsets.y;
-    magCorrectField.z -= offsets.z;
-
-    // Add in scale factor, use a wide sanity check. The calibrator uses a narrower check.
-    if (magScaleFactor > COMPASS_MIN_SCALE_FACTOR && magScaleFactor < COMPASS_MAX_SCALE_FACTOR)
-    {
-        magCorrectField.x *= magScaleFactor;
-        magCorrectField.y *= magScaleFactor;
-        magCorrectField.z *= magScaleFactor;
-    }
-
-    // Apply eliptical correction
-    if (diagonals.x != 0.0f && diagonals.y != 0.0f && diagonals.z != 0.0f)
-    {
-        fpMatrix3_t mat = initMatrixUsingVector(diagonals.x, offdiagonals.x, offdiagonals.y,
-                                                offdiagonals.x, diagonals.y, offdiagonals.z,
-                                                offdiagonals.y, offdiagonals.z, diagonals.z);
-
-        magCorrectField = multiplyMatrixByVector(mat, magCorrectField);
-    }
-
     if (!getCompassCalibrationFinished() && compassConfig()->mag_cal_type == MAG_CALIBRATION_USING_GPS)
     {
         LED0_TOGGLE;
 
-        if (CompassCalibrationFixedYaw(yawShoted, magCorrectField, &compassConfigMutable()->offSet, &compassConfigMutable()->diagonals, &compassConfigMutable()->offDiagonals))
+        if (compassCalibrationQuick(yawShoted, magSamples, &compassConfigMutable()->offSet))
         {
             saveConfigAndNotify();
             setCompassCalibrationFinished(true);
         }
     }
 
-    mag.magADC[X] = magCorrectField.x;
-    mag.magADC[Y] = magCorrectField.y;
-    mag.magADC[Z] = magCorrectField.z;
-
-    mag.lastUpdateUs = currentTimeUs;
+    mag.magADC[X] = magSamples.x;
+    mag.magADC[Y] = magSamples.y;
+    mag.magADC[Z] = magSamples.z;
 
     return;
+}
+
+bool compassIsCalibrationComplete(void)
+{
+    if (STATE(COMPASS_CALIBRATED))
+    {
+        return true;
+    }
+
+    return false;
+}
+
+bool compassIsHealthy(void)
+{
+    if (calc_length_pythagorean_3D(mag.magADC[X], mag.magADC[Y], mag.magADC[Z]) != 0.0f)
+    {
+        return true;
+    }
+
+    return false;
 }
 
 #endif

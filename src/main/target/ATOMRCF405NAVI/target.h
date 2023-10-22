@@ -65,7 +65,7 @@
 
 //BMI270
 #define USE_IMU_BMI270
-#define IMU_BMI270_ALIGN                CW180_DEG
+#define IMU_BMI270_ALIGN                ALIGN_YAW_180
 #define BMI270_SPI_BUS                  BUS_SPI1
 #define BMI270_CS_PIN                   PA4
 

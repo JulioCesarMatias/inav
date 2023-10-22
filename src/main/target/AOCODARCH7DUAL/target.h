@@ -42,14 +42,14 @@
 
 #define USE_IMU_MPU6000
 
-#define IMU_MPU6000_ALIGN       CW0_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_DEFAULT
 #define MPU6000_SPI_BUS         BUS_SPI1
 #define MPU6000_CS_PIN          PC15
 #define MPU6000_EXTI_PIN        PB2
 
 #define USE_IMU_BMI270
 
-#define IMU_BMI270_ALIGN_1        CW90_DEG
+#define IMU_BMI270_ALIGN_1        ALIGN_YAW_270
 #define BMI270_SPI_BUS_1          BUS_SPI1
 #define BMI270_CS_PIN_1           PC15
 #define BMI270_EXTI_PIN_1         PB2
@@ -62,7 +62,7 @@
 
 #define USE_IMU_BMI270
 
-#define IMU_BMI270_ALIGN_2       CW180_DEG
+#define IMU_BMI270_ALIGN_2       ALIGN_YAW_180
 #define BMI270_SPI_BUS_2         BUS_SPI4
 #define BMI270_CS_PIN_2          PE11
 #define BMI270_EXTI_PIN_2        PE15

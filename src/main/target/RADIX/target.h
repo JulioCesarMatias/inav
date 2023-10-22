@@ -30,7 +30,7 @@
 #define BMI160_CS_PIN           PB4
 
 #define USE_IMU_BMI160
-#define IMU_BMI160_ALIGN        CW0_DEG
+#define IMU_BMI160_ALIGN        ALIGN_DEFAULT
 
 // #define USE_MAG
 // #define MAG_I2C_BUS             BUS_I2C1

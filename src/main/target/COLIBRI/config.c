@@ -32,6 +32,6 @@ void targetConfiguration(void)
     rxConfigMutable()->receiverType = RX_TYPE_SERIAL;
     serialConfigMutable()->portConfigs[2].functionMask = FUNCTION_RX_SERIAL;
 #ifdef QUANTON
-    compassConfigMutable()->mag_align = CW90_DEG;
+    compassConfigMutable()->mag_align = ALIGN_YAW_270;
 #endif
 }

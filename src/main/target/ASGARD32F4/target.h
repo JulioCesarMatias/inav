@@ -36,7 +36,7 @@
 #define BEEPER_INVERTED
 
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN       CW90_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_YAW_270
 #define MPU6000_CS_PIN          PA4
 #define MPU6000_SPI_BUS         BUS_SPI1
 

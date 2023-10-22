@@ -520,7 +520,7 @@ STATIC_UNIT_TESTED void imuUpdateEulerAngles(void)
 	{
 		/* Compute pitch/roll angles */
 		attitude.values.roll = RADIANS_TO_DECIDEGREES(atan2_approx(rotationMatrix.m[2][1], rotationMatrix.m[2][2]));
-		attitude.values.pitch = RADIANS_TO_DECIDEGREES((0.5f * M_PIf) - acos_approx(-rotationMatrix.m[2][0]));
+		attitude.values.pitch = RADIANS_TO_DECIDEGREES(asin_approx(-rotationMatrix.m[2][0]));
 		attitude.values.yaw = RADIANS_TO_DECIDEGREES(-atan2_approx(rotationMatrix.m[1][0], rotationMatrix.m[0][0]));
 	}
 

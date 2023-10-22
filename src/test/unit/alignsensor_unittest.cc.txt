@@ -228,41 +228,41 @@ static void testCWFlip(sensor_align_e rotation, int32_t angle)
 TEST(AlignSensorTest, ClockwiseZeroDegrees)
 {
     srand(time(NULL));
-    testCW(CW0_DEG, 0);
+    testCW(ALIGN_DEFAULT, 0);
 }
 
 TEST(AlignSensorTest, ClockwiseNinetyDegrees)
 {
-    testCW(CW90_DEG, 90);
+    testCW(ALIGN_YAW_270, 90);
 }
 
 TEST(AlignSensorTest, ClockwiseOneEightyDegrees)
 {
-    testCW(CW180_DEG, 180);
+    testCW(ALIGN_YAW_180, 180);
 }
 
 TEST(AlignSensorTest, ClockwiseTwoSeventyDegrees)
 {
-    testCW(CW270_DEG, 270);
+    testCW(ALIGN_YAW_90, 270);
 }
 
 TEST(AlignSensorTest, ClockwiseZeroDegreesFlip)
 {
-    testCWFlip(CW0_DEG_FLIP, 0);
+    testCWFlip(ALIGN_PITCH_180, 0);
 }
 
 TEST(AlignSensorTest, ClockwiseNinetyDegreesFlip)
 {
-    testCWFlip(CW90_DEG_FLIP, 90);
+    testCWFlip(ALIGN_ROLL_180_YAW_90, 90);
 }
 
 TEST(AlignSensorTest, ClockwiseOneEightyDegreesFlip)
 {
-    testCWFlip(CW180_DEG_FLIP, 180);
+    testCWFlip(ALIGN_ROLL_180, 180);
 }
 
 TEST(AlignSensorTest, ClockwiseTwoSeventyDegreesFlip)
 {
-    testCWFlip(CW270_DEG_FLIP, 270);
+    testCWFlip(ALIGN_ROLL_180_YAW_270, 270);
 }
 

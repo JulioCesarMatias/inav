@@ -1336,14 +1336,6 @@ static bool mspFcProcessOutCommand(uint16_t cmdMSP, sbuf_t *dst, mspPostProcessF
         sbufWriteU16(dst, (int16_t)(compassConfig()->offSet.y * 100.0f));
         sbufWriteU16(dst, (int16_t)(compassConfig()->offSet.z * 100.0f));
 
-        sbufWriteU16(dst, (int16_t)(compassConfig()->diagonals.x * 100.0f));
-        sbufWriteU16(dst, (int16_t)(compassConfig()->diagonals.y * 100.0f));
-        sbufWriteU16(dst, (int16_t)(compassConfig()->diagonals.z * 100.0f));
-
-        sbufWriteU16(dst, (int16_t)(compassConfig()->offDiagonals.x * 100.0f));
-        sbufWriteU16(dst, (int16_t)(compassConfig()->offDiagonals.y * 100.0f));
-        sbufWriteU16(dst, (int16_t)(compassConfig()->offDiagonals.z * 100.0f));
-
         sbufWriteU16(dst, (int16_t)(compassConfig()->scaleFactor * 100.0f));
 
         const Report compassCalibrationReport = getCompassCalibrationReport();
@@ -1361,14 +1353,6 @@ static bool mspFcProcessOutCommand(uint16_t cmdMSP, sbuf_t *dst, mspPostProcessF
         sbufWriteU8(dst,  compassCalibrationState.calibration_finished);
 
     #else
-
-        sbufWriteU16(dst, 0);
-        sbufWriteU16(dst, 0);
-        sbufWriteU16(dst, 0);
-
-        sbufWriteU16(dst, 0);
-        sbufWrite16(dst, 0);
-        sbufWrite16(dst, 0);
 
         sbufWriteU16(dst, 0);
         sbufWriteU16(dst, 0);

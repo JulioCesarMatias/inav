@@ -29,7 +29,7 @@
 #ifdef FOXEERF745AIO_V3
 
 #define USE_IMU_ICM42605
-#define IMU_ICM42605_ALIGN      CW90_DEG
+#define IMU_ICM42605_ALIGN      ALIGN_YAW_270
 #define ICM42605_SPI_BUS        BUS_SPI3
 #define ICM42605_CS_PIN         PA15
 
@@ -37,7 +37,7 @@
 
 // MPU6000
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN       CW180_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_YAW_180
 #define MPU6000_CS_PIN          PA15
 #define MPU6000_SPI_BUS         BUS_SPI3
 

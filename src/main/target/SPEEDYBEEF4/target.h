@@ -31,7 +31,7 @@
 #define USE_IMU_MPU6000
 #define MPU6000_CS_PIN          PB11
 #define MPU6000_SPI_BUS         BUS_SPI1
-#define IMU_MPU6000_ALIGN       CW0_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_DEFAULT
 
 /*** SPI/I2C bus ***/
 #define USE_SPI								

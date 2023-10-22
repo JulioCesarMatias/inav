@@ -38,11 +38,11 @@
 #define MPU6000_SPI_BUS                 BUS_SPI1
 
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN               CW180_DEG
+#define IMU_MPU6000_ALIGN               ALIGN_YAW_180
 
 // The 2022 variant of F722_I2C with MPU6500
 #define USE_IMU_MPU6500
-#define IMU_MPU6500_ALIGN               CW180_DEG
+#define IMU_MPU6500_ALIGN               ALIGN_YAW_180
 #define MPU6500_CS_PIN                  SPI1_NSS_PIN
 #define MPU6500_SPI_BUS                 BUS_SPI1
 

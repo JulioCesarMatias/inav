@@ -492,7 +492,7 @@ cfTask_t cfTasks[TASK_COUNT] = {
         .taskName = "COMPASS",
         .taskFunc = taskUpdateCompass,
         .desiredPeriod = TASK_PERIOD_HZ(10),      // Compass is updated at 10 Hz
-        .staticPriority = TASK_PRIORITY_MEDIUM,
+        .staticPriority = TASK_PRIORITY_HIGH,
     },
 #endif
 

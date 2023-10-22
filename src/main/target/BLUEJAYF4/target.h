@@ -37,7 +37,7 @@
 #define MPU6500_CS_PIN          PC4
 #define MPU6500_SPI_BUS         BUS_SPI1
 #define USE_IMU_MPU6500
-#define IMU_MPU6500_ALIGN       CW0_DEG
+#define IMU_MPU6500_ALIGN       ALIGN_DEFAULT
 
 #define USE_MAG
 #define MAG_I2C_BUS             BUS_I2C1

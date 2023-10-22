@@ -64,8 +64,6 @@ typedef struct mag_s
 {
     magDev_t dev;
     float magADC[XYZ_AXIS_COUNT];
-    timeUs_t time;
-    timeUs_t lastUpdateUs;
 } mag_t;
 
 extern mag_t mag;
@@ -82,8 +80,6 @@ typedef struct compassConfig_s
     uint8_t mag_cal_type;
     fpVector3_t offSet;
     float scaleFactor;
-    fpVector3_t diagonals;
-    fpVector3_t offDiagonals;
 #ifdef USE_DUAL_MAG
     uint8_t mag_to_use;
 #endif
@@ -91,10 +87,10 @@ typedef struct compassConfig_s
 
 PG_DECLARE(compassConfig_t, compassConfig);
 
-bool compassDetect(magDev_t *dev, magSensor_e magHardwareToUse);
 bool compassInit(void);
+bool compassDetect(magDev_t *dev, magSensor_e magHardwareToUse);
 void compassUpdate(timeUs_t currentTimeUs);
-bool compassIsHealthy(void);
 bool compassIsCalibrationComplete(void);
+bool compassIsHealthy(void);
 
 #endif

@@ -324,7 +324,7 @@ Arbitrary board rotation in deci-degrees (0.1 degree), to allow mounting it side
 
 ### align_mag
 
-When running on non-default hardware or adding support for new sensors/sensor boards, these values are used for sensor orientation. When carefully understood, these values can also be used to rotate (in 90deg steps) or flip the board. Possible values are: DEFAULT, CW0_DEG, CW90_DEG, CW180_DEG, CW270_DEG, CW0_DEG_FLIP, CW90_DEG_FLIP, CW180_DEG_FLIP, CW270_DEG_FLIP.
+When running on non-default hardware or adding support for new sensors/sensor boards, these values are used for sensor orientation. When carefully understood, these values can also be used to rotate (in 90deg steps) or flip the board. Possible values are: DEFAULT, ROLL180, ROLL180YAW90, ROLL180YAW270, PITCH180, YAW90, YAW180, YAW270.
 
 | Default | Min | Max |
 | --- | --- | --- |
@@ -334,11 +334,11 @@ When running on non-default hardware or adding support for new sensors/sensor bo
 
 ### align_opflow
 
-Optical flow module alignment (default CW0_DEG_FLIP)
+Optical flow module alignment (default PITCH180)
 
 | Default | Min | Max |
 | --- | --- | --- |
-| CW0FLIP |  |  |
+| PITCH180 |  |  |
 
 ---
 
@@ -2119,66 +2119,6 @@ Allow to chose between built-in and external compass sensor if they are connecte
 | Default | Min | Max |
 | --- | --- | --- |
 | 0 | 0 | 1 |
-
----
-
-### magdiagonals_x
-
-Magnetometer soft-iron diagonal X component
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 1.0 | -10000 | 100000 |
-
----
-
-### magdiagonals_y
-
-Magnetometer soft-iron diagonal Y component
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 1.0 | -10000 | 100000 |
-
----
-
-### magdiagonals_z
-
-Magnetometer soft-iron diagonal Z component
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 1.0 | -10000 | 100000 |
-
----
-
-### magoffdiagonals_x
-
-Magnetometer soft-iron off-diagonal X component
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0.0 | -10000 | 100000 |
-
----
-
-### magoffdiagonals_y
-
-Magnetometer soft-iron off-diagonal Y component
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0.0 | -10000 | 100000 |
-
----
-
-### magoffdiagonals_z
-
-Magnetometer soft-iron off-diagonal Z component
-
-| Default | Min | Max |
-| --- | --- | --- |
-| 0.0 | -10000 | 100000 |
 
 ---
 

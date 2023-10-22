@@ -1,6 +1,6 @@
 tables:
   - name: alignment
-    values: ["DEFAULT", "CW0", "CW90", "CW180", "CW270", "CW0FLIP", "CW90FLIP", "CW180FLIP", "CW270FLIP"]
+    values: ["DEFAULT", "ROLL180", "ROLL180YAW90", "ROLL180YAW270", "PITCH180", "YAW90", "YAW180", "YAW270"]
   - name: gyro_lpf
     values: ["256HZ", "188HZ", "98HZ", "42HZ", "20HZ", "10HZ"]
   - name: acc_hardware
@@ -475,8 +475,8 @@ groups:
         max: 10000
         default_value: 10.5
       - name: align_opflow
-        description: "Optical flow module alignment (default CW0_DEG_FLIP)"
-        default_value: CW0FLIP
+        description: "Optical flow module alignment (default PITCH180)"
+        default_value: PITCH180
         field: opflow_align
         type: uint8_t
         table: alignment
@@ -487,7 +487,7 @@ groups:
     condition: USE_MAG
     members:
       - name: align_mag
-        description: "When running on non-default hardware or adding support for new sensors/sensor boards, these values are used for sensor orientation. When carefully understood, these values can also be used to rotate (in 90deg steps) or flip the board. Possible values are: DEFAULT, CW0_DEG, CW90_DEG, CW180_DEG, CW270_DEG, CW0_DEG_FLIP, CW90_DEG_FLIP, CW180_DEG_FLIP, CW270_DEG_FLIP."
+        description: "When running on non-default hardware or adding support for new sensors/sensor boards, these values are used for sensor orientation. When carefully understood, these values can also be used to rotate (in 90deg steps) or flip the board. Possible values are: DEFAULT, ROLL180, ROLL180YAW90, ROLL180YAW270, PITCH180, YAW90, YAW180, YAW270."
         default_value: "DEFAULT"
         field: mag_align
         type: uint8_t
@@ -542,42 +542,6 @@ groups:
         field: scaleFactor
         min: 0
         max: 2
-      - name: magdiagonals_x
-        description: "Magnetometer soft-iron diagonal X component"
-        default_value: 1.0
-        field: diagonals.x
-        min: -10000
-        max: 100000
-      - name: magdiagonals_y
-        description: "Magnetometer soft-iron diagonal Y component"
-        default_value: 1.0
-        field: diagonals.y
-        min: -10000
-        max: 100000
-      - name: magdiagonals_z
-        description: "Magnetometer soft-iron diagonal Z component"
-        default_value: 1.0
-        field: diagonals.z
-        min: -10000
-        max: 100000
-      - name: magoffdiagonals_x
-        description: "Magnetometer soft-iron off-diagonal X component"
-        default_value: 0.0
-        field: offDiagonals.x
-        min: -10000
-        max: 100000
-      - name: magoffdiagonals_y
-        description: "Magnetometer soft-iron off-diagonal Y component"
-        default_value: 0.0
-        field: offDiagonals.y
-        min: -10000
-        max: 100000
-      - name: magoffdiagonals_z
-        description: "Magnetometer soft-iron off-diagonal Z component"
-        default_value: 0.0
-        field: offDiagonals.z
-        min: -10000
-        max: 100000
       - name: mag_to_use
         description: "Allow to chose between built-in and external compass sensor if they are connected to separate buses. Currently only for REVO target"
         condition: USE_DUAL_MAG

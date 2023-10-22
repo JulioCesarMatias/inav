@@ -39,12 +39,12 @@
 #define USE_TARGET_IMU_HARDWARE_DESCRIPTORS
 
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN       CW270_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_YAW_90
 #define MPU6000_CS_PIN          PB12
 #define MPU6000_SPI_BUS         BUS_SPI2
 
 #define USE_IMU_BMI270
-#define IMU_BMI270_ALIGN        CW180_DEG
+#define IMU_BMI270_ALIGN        ALIGN_YAW_180
 #define BMI270_CS_PIN           PA13
 #define BMI270_SPI_BUS          BUS_SPI2
 

@@ -37,7 +37,7 @@
 #define SPI1_NSS_PIN            PA4
 
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN       CW0_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_DEFAULT
 #define MPU6000_CS_PIN          SPI1_NSS_PIN
 #define MPU6000_SPI_BUS         BUS_SPI1
 

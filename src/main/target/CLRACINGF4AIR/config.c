@@ -51,5 +51,5 @@
 
 void targetConfiguration(void)
 {
-    compassConfigMutable()->mag_align = CW90_DEG;
+    compassConfigMutable()->mag_align = ALIGN_YAW_270;
 }

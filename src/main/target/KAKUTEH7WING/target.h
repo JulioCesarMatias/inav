@@ -44,7 +44,7 @@
 
 #define USE_IMU_BMI088
 
-#define IMU_BMI088_ALIGN        CW0_DEG
+#define IMU_BMI088_ALIGN        ALIGN_DEFAULT
 #define BMI088_SPI_BUS          BUS_SPI1
 
 #define BMI088_GYRO_CS_PIN      PC9
@@ -59,7 +59,7 @@
 #define SPI3_MOSI_PIN           PC12
 
 #define USE_IMU_ICM42605
-#define IMU_ICM42605_ALIGN       CW90_DEG
+#define IMU_ICM42605_ALIGN       ALIGN_YAW_270
 #define ICM42605_SPI_BUS         BUS_SPI3
 #define ICM42605_CS_PIN          PE12
 #define ICM42605_EXTI_PIN        PE15

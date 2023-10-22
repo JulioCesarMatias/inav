@@ -44,13 +44,13 @@
 #define MPU6000_SPI_BUS         BUS_SPI1
 
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN       CW270_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_YAW_90
 #else
 #define BMI270_CS_PIN           PA4
 #define BMI270_SPI_BUS          BUS_SPI1
 
 #define USE_IMU_BMI270
-#define IMU_BMI270_ALIGN        CW90_DEG_FLIP
+#define IMU_BMI270_ALIGN        ALIGN_ROLL_180_YAW_90
 #endif
 
 // *************** M25P256 flash ********************

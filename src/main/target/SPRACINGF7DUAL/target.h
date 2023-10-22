@@ -43,11 +43,11 @@
 #define IMU_2_ALIGN                 IMU_MPU6500_2_ALIGN
 
 #if (SPRACINGF7DUAL_REV >= 2)
-#define IMU_MPU6500_1_ALIGN         CW0_DEG
-#define IMU_MPU6500_2_ALIGN         CW270_DEG
+#define IMU_MPU6500_1_ALIGN         ALIGN_DEFAULT
+#define IMU_MPU6500_2_ALIGN         ALIGN_YAW_90
 #else
-#define IMU_MPU6500_1_ALIGN         CW180_DEG
-#define IMU_MPU6500_2_ALIGN         CW270_DEG
+#define IMU_MPU6500_1_ALIGN         ALIGN_YAW_180
+#define IMU_MPU6500_2_ALIGN         ALIGN_YAW_90
 #endif
 
 #define USE_BARO

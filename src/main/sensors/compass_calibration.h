@@ -57,11 +57,11 @@ typedef enum
 // results
 typedef struct
 {
-    float radius;        // magnetic field strength calculated from samples
-    fpVector3_t offset;  // offsets
-    fpVector3_t diag;    // diagonal scaling
-    fpVector3_t offdiag; // off diagonal scaling
-    float scale_factor;  // scaling factor to compensate for radius error
+    float radius;       // Magnetic field strength calculated from samples
+    fpVector3_t offset; // Offsets
+    fpVector3_t diag;
+    fpVector3_t offdiag;
+    float scale_factor; // Scaling factor to compensate for radius error
 } param_t;
 
 typedef struct
@@ -85,7 +85,7 @@ typedef struct
     bool calibration_finished;
     uint8_t attempt;
     float completion_pct;
-    uint16_t fit_step; // step during RUNNING_STEP_ONE/TWO which performs sphere fit and ellipsoid fit
+    uint16_t fit_step; // Step during RUNNING_STEP_ONE/TWO which performs sphere fit and ellipsoid fit
 } State;
 
 // Structure accessed after calibration is finished/failed
@@ -94,8 +94,6 @@ typedef struct
     status_e status;
     float fitness;
     fpVector3_t ofs;
-    fpVector3_t diag;
-    fpVector3_t offdiag;
     float orientation_confidence;
     sensor_align_e original_orientation;
     sensor_align_e orientation;
@@ -114,11 +112,11 @@ typedef struct
     bool fix_orientation;
     uint16_t offset_max;
     uint8_t attempt;
-    float delay_start_sec;
     uint32_t start_time_ms;
+    uint32_t delay_start_us;
 } Settings;
 
-void compassCalibrationStart(float delay, uint16_t offset_max, float tolerance);
+void compassCalibrationStart(uint32_t delay, uint16_t offset_max, float tolerance);
 void compassCalibrationStop(void);
 void compassCalibrationSetNewSample(const fpVector3_t sample);
 void compassCalibrationSetOrientation(sensor_align_e orientation, bool is_external, bool fix_orientation);
@@ -128,4 +126,4 @@ Report getCompassCalibrationReport(void);
 State getCompassCalibrationState(void);
 void setCompassCalibrationFinished(bool state);
 bool getCompassCalibrationFinished(void);
-bool CompassCalibrationFixedYaw(float yaw_deg, fpVector3_t magfield, fpVector3_t *offsets, fpVector3_t *diagonals, fpVector3_t *offdiagonals);
+bool compassCalibrationQuick(float yaw_deg, fpVector3_t magfield, fpVector3_t *offsets);

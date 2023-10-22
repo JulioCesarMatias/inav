@@ -98,7 +98,7 @@
 
 //MPU6000
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN       CW270_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_YAW_90
 #define MPU6000_SPI_BUS         BUS_SPI4
 #define MPU6000_CS_PIN          PE4
 
@@ -108,9 +108,9 @@
 #define BMI270_CS_PIN           PE4
 
 #ifdef KAKUTEH7MINI
-#define IMU_BMI270_ALIGN        CW270_DEG
+#define IMU_BMI270_ALIGN        ALIGN_YAW_90
 #else
-#define IMU_BMI270_ALIGN        CW0_DEG
+#define IMU_BMI270_ALIGN        ALIGN_DEFAULT
 #endif
 
 #define USE_MAX7456

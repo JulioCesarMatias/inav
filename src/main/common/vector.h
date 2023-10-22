@@ -22,32 +22,35 @@
 
 #include "common/maths.h"
 #include "drivers/sensor.h"
-#include "sensors/boardalignment.h"
 
-typedef union {
+typedef union
+{
     float v[3];
-    struct {
-       float x,y,z;
+    struct
+    {
+        float x, y, z;
     };
 } fpVector3_t;
 
-typedef struct {
+typedef struct
+{
     float m[3][3];
 } fpMatrix3_t;
 
-typedef struct {
+typedef struct
+{
     fpVector3_t axis;
     float angle;
 } fpAxisAngle_t;
 
-void rotationMatrixFromEulerAngles(fpMatrix3_t * rmat, const fp_angles_t * angles);
-void rotationMatrixFromAxisAngle(fpMatrix3_t * rmat, const fpAxisAngle_t * a);
+void rotationMatrixFromEulerAngles(fpMatrix3_t *rmat, const fp_angles_t *angles);
+void rotationMatrixFromAxisAngle(fpMatrix3_t *rmat, const fpAxisAngle_t *a);
 fpVector3_t multiplyMatrixByVector(fpMatrix3_t m, fpVector3_t v);
 fpMatrix3_t initMatrixUsingVector(float ax, float ay, float az, float bx, float by, float bz, float cx, float cy, float cz);
-fpMatrix3_t matrixTransposed(const fpMatrix3_t matrix) ;
+fpMatrix3_t matrixTransposed(const fpMatrix3_t matrix);
 bool matrixInvert(fpMatrix3_t *inv);
 
-static inline void vectorZero(fpVector3_t * v)
+static inline void vectorZero(fpVector3_t *v)
 {
     v->x = 0.0f;
     v->y = 0.0f;
@@ -63,20 +66,22 @@ static inline void multiplicationTransposeMatrixByVector(const fpMatrix3_t mat, 
     vec->z = mat.m[0][2] * v.x + mat.m[1][2] * v.y + mat.m[2][2] * v.z;
 }
 
-static inline float vectorLengthSquared(const fpVector3_t * v)
+static inline float vectorLengthSquared(const fpVector3_t *v)
 {
     return sq(v->x) + sq(v->y) + sq(v->z);
 }
 
-static inline fpVector3_t * vectorNormalize(fpVector3_t * result, const fpVector3_t * v)
+static inline fpVector3_t *vectorNormalize(fpVector3_t *result, const fpVector3_t *v)
 {
     float length = fast_fsqrtf(vectorLengthSquared(v));
-    if (length != 0) {
+    if (length != 0)
+    {
         result->x = v->x / length;
         result->y = v->y / length;
         result->z = v->z / length;
     }
-    else {
+    else
+    {
         result->x = 0;
         result->y = 0;
         result->z = 0;
@@ -84,7 +89,7 @@ static inline fpVector3_t * vectorNormalize(fpVector3_t * result, const fpVector
     return result;
 }
 
-static inline fpVector3_t * vectorCrossProduct(fpVector3_t * result, const fpVector3_t * a, const fpVector3_t * b)
+static inline fpVector3_t *vectorCrossProduct(fpVector3_t *result, const fpVector3_t *a, const fpVector3_t *b)
 {
     fpVector3_t ab;
 
@@ -96,7 +101,7 @@ static inline fpVector3_t * vectorCrossProduct(fpVector3_t * result, const fpVec
     return result;
 }
 
-static inline fpVector3_t * vectorAdd(fpVector3_t * result, const fpVector3_t * a, const fpVector3_t * b)
+static inline fpVector3_t *vectorAdd(fpVector3_t *result, const fpVector3_t *a, const fpVector3_t *b)
 {
     fpVector3_t ab;
 
@@ -108,7 +113,7 @@ static inline fpVector3_t * vectorAdd(fpVector3_t * result, const fpVector3_t * 
     return result;
 }
 
-static inline fpVector3_t * vectorScale(fpVector3_t * result, const fpVector3_t * a, const float b)
+static inline fpVector3_t *vectorScale(fpVector3_t *result, const fpVector3_t *a, const float b)
 {
     fpVector3_t ab;
 
@@ -122,11 +127,64 @@ static inline fpVector3_t * vectorScale(fpVector3_t * result, const fpVector3_t 
 
 static inline void vectorRotate(fpVector3_t *vec, const sensor_align_e rotation)
 {
-    float vecCopy[3] = {vec->x, vec->y, vec->z};
-    applySensorAlignment(vecCopy, vecCopy, rotation);
-    vec->x = vecCopy[0];
-    vec->y = vecCopy[1];
-    vec->z = vecCopy[2];
+    // Create a copy so we could use the same buffer for src & dest
+    const float x = vec->x;
+    const float y = vec->y;
+    const float z = vec->z;
+
+    switch (rotation)
+    {
+    case ALIGN_DEFAULT:
+        vec->x = x;
+        vec->y = y;
+        vec->z = z;
+        break;
+
+    case ALIGN_ROLL_180:
+        vec->x = x;
+        vec->y = -y;
+        vec->z = -z;
+        break;
+
+    case ALIGN_ROLL_180_YAW_90:
+        vec->x = y;
+        vec->y = x;
+        vec->z = -z;
+        break;
+
+    case ALIGN_ROLL_180_YAW_270:
+        vec->x = -y;
+        vec->y = -x;
+        vec->z = -z;
+        break;
+
+    case ALIGN_PITCH_180:
+        vec->x = -x;
+        vec->y = y;
+        vec->z = -z;
+        break;
+        
+    case ALIGN_YAW_90:
+        vec->x = -y;
+        vec->y = x;
+        vec->z = z;
+        break;
+
+    case ALIGN_YAW_180:
+        vec->x = -x;
+        vec->y = -y;
+        vec->z = z;
+        break;
+
+    case ALIGN_YAW_270:
+        vec->x = y;
+        vec->y = -x;
+        vec->z = z;
+        break;
+
+    default:
+        break;
+    }
 }
 
 static inline void vectorRotateInverse(fpVector3_t *vec, const sensor_align_e rotation)
@@ -139,7 +197,7 @@ static inline void vectorRotateInverse(fpVector3_t *vec, const sensor_align_e ro
     vectorRotate(&y_vec, rotation);
     vectorRotate(&z_vec, rotation);
 
-    fpMatrix3_t vecToMatrix = initMatrixUsingVector(x_vec.x, y_vec.x, z_vec.x, 
+    fpMatrix3_t vecToMatrix = initMatrixUsingVector(x_vec.x, y_vec.x, z_vec.x,
                                                     x_vec.y, y_vec.y, z_vec.y,
                                                     x_vec.z, y_vec.z, z_vec.z);
 

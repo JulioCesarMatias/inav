@@ -33,11 +33,11 @@
 
 #define GYRO_1_SPI_BUS          BUS_SPI1
 #define GYRO_1_CS_PIN           PA4
-#define GYRO_1_ALIGN            CW180_DEG_FLIP
+#define GYRO_1_ALIGN            ALIGN_ROLL_180
 
 #define GYRO_2_SPI_BUS          BUS_SPI1
 #define GYRO_2_CS_PIN           PB2
-#define GYRO_2_ALIGN            CW270_DEG 
+#define GYRO_2_ALIGN            ALIGN_YAW_90 
 
 /*** SPI/I2C bus ***/
 #define USE_SPI

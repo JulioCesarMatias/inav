@@ -48,7 +48,7 @@
 #define MPU9250_CS_PIN          PA4
 #define MPU9250_SPI_BUS         BUS_SPI1
 #define USE_IMU_MPU9250
-#define IMU_MPU9250_ALIGN       CW0_DEG
+#define IMU_MPU9250_ALIGN       ALIGN_DEFAULT
 
 #define USE_MAG
 #define USE_MAG_MPU9250

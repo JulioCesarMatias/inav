@@ -58,14 +58,14 @@
 // *************** SPI3 IMU0 ICM42688P **************
 #define USE_IMU_ICM42605
 
-#define IMU_ICM42605_ALIGN      CW0_DEG
+#define IMU_ICM42605_ALIGN      ALIGN_DEFAULT
 #define ICM42605_SPI_BUS        BUS_SPI3
 #define ICM42605_CS_PIN         SPI3_NSS_PIN
 
 // *************** SPI3 IMU0 BMI270 **************
 #define USE_IMU_BMI270
 
-#define IMU_BMI270_ALIGN      CW270_DEG
+#define IMU_BMI270_ALIGN      ALIGN_YAW_90
 #define BMI270_SPI_BUS        BUS_SPI3
 #define BMI270_CS_PIN         SPI3_NSS_PIN
 #endif
@@ -79,7 +79,7 @@
 
 #define MPU6000_CS_PIN          SPI1_NSS_PIN
 #define MPU6000_SPI_BUS         BUS_SPI1
-#define IMU_MPU6000_ALIGN       CW0_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_DEFAULT
 #define USE_IMU_MPU6000
 #endif
 
@@ -94,7 +94,7 @@
 #define MPU6000_CS_PIN          SPI2_NSS_PIN
 #define MPU6000_SPI_BUS         BUS_SPI2
 
-#define IMU_MPU6000_ALIGN       CW0_DEG_FLIP
+#define IMU_MPU6000_ALIGN       ALIGN_PITCH_180
 #define USE_IMU_MPU6000
 #endif
 

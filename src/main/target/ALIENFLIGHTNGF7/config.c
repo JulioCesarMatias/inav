@@ -59,7 +59,7 @@
 // alternative defaults settings for AlienFlight targets
 void targetConfiguration(void)
 {
-    compassConfigMutable()->mag_align = CW90_DEG;
+    compassConfigMutable()->mag_align = ALIGN_YAW_270;
 
     serialConfigMutable()->portConfigs[2].functionMask = FUNCTION_RX_SERIAL;
     batteryMetersConfigMutable()->current.offset = CURRENTOFFSET;

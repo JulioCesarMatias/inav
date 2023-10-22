@@ -48,7 +48,7 @@
 #define MPU6500_SPI_BUS         BUS_SPI1
 
 #define USE_IMU_MPU6500
-#define IMU_MPU6500_ALIGN       CW90_DEG
+#define IMU_MPU6500_ALIGN       ALIGN_YAW_270
 
 #define USE_I2C
 #define USE_I2C_DEVICE_2

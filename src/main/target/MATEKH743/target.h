@@ -45,7 +45,7 @@
 
 #define USE_IMU_MPU6000
 
-#define IMU_MPU6000_ALIGN       CW0_DEG_FLIP
+#define IMU_MPU6000_ALIGN       ALIGN_PITCH_180
 #define MPU6000_SPI_BUS          BUS_SPI1
 #define MPU6000_CS_PIN          PC15
 
@@ -57,14 +57,14 @@
 
 #define USE_IMU_MPU6500
 
-#define IMU_MPU6500_ALIGN       CW0_DEG_FLIP
+#define IMU_MPU6500_ALIGN       ALIGN_PITCH_180
 #define MPU6500_SPI_BUS         BUS_SPI4
 #define MPU6500_CS_PIN          PE11
 
 // *************** SPI4 IMU2 ICM42605 **************
 #define USE_IMU_ICM42605
 
-#define IMU_ICM42605_ALIGN      CW90_DEG_FLIP
+#define IMU_ICM42605_ALIGN      ALIGN_ROLL_180_YAW_90
 #define ICM42605_SPI_BUS        BUS_SPI4
 #define ICM42605_CS_PIN         PC13
 

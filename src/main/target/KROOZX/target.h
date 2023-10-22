@@ -32,7 +32,7 @@
 #define MPU6000_SPI_BUS         BUS_SPI1
 
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN       CW90_DEG_FLIP
+#define IMU_MPU6000_ALIGN       ALIGN_ROLL_180_YAW_90
 
 #define USE_MAG
 #define MAG_I2C_BUS             BUS_I2C1

@@ -153,7 +153,6 @@ TEST(MathsUnittest, TestRotateVectorAroundAxis)
     expectVectorsAreEqual(&vector, &expected_result);
 }
 
-#if defined(FAST_MATH) || defined(VERY_FAST_MATH)
 TEST(MathsUnittest, TestFastTrigonometrySinCos)
 {
     EXPECT_NEAR(sin_approx(0.0f),                        0.0f, 1e-6);
@@ -235,4 +234,3 @@ TEST(MathsUnittest, TestSensorScaleUnitTest)
     EXPECT_NEAR(result[2], 1, 1e-4);
 }
 */
-#endif

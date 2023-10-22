@@ -34,10 +34,10 @@
 
 
 #define USE_IMU_MPU6000
-#define IMU_MPU6000_ALIGN       CW90_DEG
+#define IMU_MPU6000_ALIGN       ALIGN_YAW_270
 
 #define USE_IMU_ICM20689
-#define IMU_ICM20689_ALIGN       CW90_DEG
+#define IMU_ICM20689_ALIGN       ALIGN_YAW_270
 
 #define USE_MAG
 #define MAG_I2C_BUS             BUS_I2C2

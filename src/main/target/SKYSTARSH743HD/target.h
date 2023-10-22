@@ -36,11 +36,11 @@
 #define USE_TARGET_IMU_HARDWARE_DESCRIPTORS
 #define USE_IMU_BMI270
 // *****IMU1 BMI270 ON  SPI4 **************
-#define IMU1_ALIGN              CW0_DEG
+#define IMU1_ALIGN              ALIGN_DEFAULT
 #define IMU1_SPI_BUS            BUS_SPI4
 #define IMU1_CS_PIN             PE11
 // *****IMU2 BMI270 ON  SPI1 **************
-#define IMU2_ALIGN              CW90_DEG
+#define IMU2_ALIGN              ALIGN_YAW_270
 #define IMU2_SPI_BUS            BUS_SPI1
 #define IMU2_CS_PIN             PC15
 

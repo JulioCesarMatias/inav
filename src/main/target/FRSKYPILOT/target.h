@@ -71,11 +71,11 @@
 
 #define MPU6500_SPI_BUS         BUS_SPI3
 #define MPU6500_CS_PIN          SPI3_NSS_PIN
-#define IMU_MPU6500_ALIGN       CW0_DEG_FLIP
+#define IMU_MPU6500_ALIGN       ALIGN_PITCH_180
 
 #define MPU6000_SPI_BUS         BUS_SPI2
 #define MPU6000_CS_PIN          SPI2_NSS_PIN
-#define IMU_MPU6000_ALIGN       CW270_DEG_FLIP
+#define IMU_MPU6000_ALIGN       ALIGN_ROLL_180_YAW_270
 
 // *************** SPI4: SDCARD *******************
 

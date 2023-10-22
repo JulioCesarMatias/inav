@@ -415,8 +415,14 @@ static bool FAST_CODE NOINLINE gyroUpdateAndCalibrate(gyroDev_t * gyroDev, zeroC
             arm_sub_f32(gyroDev->gyroADCRaw, gyroDev->gyroZero, gyroADCtmp, 3);
 
             // Apply sensor alignment
-            applySensorAlignment(gyroADCtmp, gyroADCtmp, gyroDev->gyroAlign);
-            applyBoardAlignment(gyroADCtmp);
+            fpVector3_t vec = {.v = {gyroADCtmp[X], gyroADCtmp[Y], gyroADCtmp[Z]}};
+
+            vectorRotate(&vec, gyroDev->gyroAlign);
+            applyBoardAlignment(&vec);
+
+            gyroADCtmp[X] = vec.x;
+            gyroADCtmp[Y] = vec.y;
+            gyroADCtmp[Z] = vec.z;
 
             // Convert to deg/s and store in unified data
             arm_scale_f32(gyroADCtmp, gyroDev->scale, gyroADCf, 3);
