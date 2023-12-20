@@ -558,6 +558,8 @@ main_sources(COMMON_SRC
     navigation/navigation_rover_boat.c
     navigation/sqrt_controller.c
     navigation/sqrt_controller.h
+    navigation/ekf.c
+    navigation/ekf.h
 
     sensors/barometer.c
     sensors/barometer.h
