@@ -15,6 +15,8 @@
  * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#pragma GCC optimize("O3")
+
 #include "navigation/ekf.h"
 
 #include "build/debug.h"
@@ -567,16 +569,18 @@ void matrix_from_euler(fpMat3_t *m, float roll, float pitch, float yaw)
     m->m[2][2] = cr * cp;
 }
 
-fpMat3_t matrix_transposed(const fpMat3_t *matrix)
-{
-    fpMat3_t result;
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            result.m[i][j] = matrix->m[j][i];
+fpMat3_t matrix_transposed(const fpMat3_t matrix) {
+    fpMat3_t result = {
+        {
+            {matrix.m[0][0], matrix.m[1][0], matrix.m[2][0]},
+            {matrix.m[0][1], matrix.m[1][1], matrix.m[2][1]},
+            {matrix.m[0][2], matrix.m[1][2], matrix.m[2][2]}
         }
-    }
+    };
+
     return result;
 }
+
 
 // recall state vector stored at closest time to the one specified by msec
 void ekf_RecallStates(state_elements_t *statesForFusion, uint32_t msec)
@@ -600,6 +604,26 @@ void ekf_RecallStates(state_elements_t *statesForFusion, uint32_t msec)
     } else  // otherwise output current state
     {
         statesForFusion = state;
+    }
+}
+
+// zero specified range of rows in the state covariance matrix
+void ekf_zeroRows(float covMat[22][22], uint8_t first, uint8_t last)
+{
+    uint8_t row;
+    for (row = first; row <= last; row++)
+    {
+        memset(&covMat[row][0], 0, sizeof(covMat[0][0]) * 22);
+    }
+}
+
+// zero specified range of columns in the state covariance matrix
+void ekf_zeroCols(float covMat[22][22], uint8_t first, uint8_t last)
+{
+    uint8_t row;
+    for (row = 0; row <= 21; row++)
+    {
+        memset(&covMat[row][first], 0, sizeof(covMat[0][0]) * (1 + last - first));
     }
 }
 
@@ -1053,8 +1077,9 @@ void ekf_InitialiseFilterDynamic(void)
 
     // Set re-used variables to zero
     ekf_ZeroVariables();
-
-    dtVelPos = US2S(getLooptime());
+    
+    // This should be a multiple of the imu update interval.
+    dtVelPos = US2S(getLooptime()) * 2.0f;
 
     // set number of updates over which gps and baro measurements are applied to
     // the velocity and position states
@@ -1805,7 +1830,7 @@ void ekf_UpdateStrapdownEquationsNED(void)
     // calculate the body to nav cosine matrix
     fpMat3_t Tbn_temp;
     quaternion_to_rotation_matrix(state->quat, &Tbn_temp);
-    prevTnb = matrix_transposed(&Tbn_temp);
+    prevTnb = matrix_transposed(Tbn_temp);
     
     // transform body delta velocities to delta velocities in the nav frame
     // * and + operators have been overloaded
@@ -3776,6 +3801,59 @@ void ekf_CovariancePrediction(void)
     ekf_ConstrainVariances();
 }
 
+// this function is used to do a forced alignment of the yaw angle to aligwith the horizontal velocity
+// vector from GPS. It is used to align the yaw angle after launch or takeoff without a magnetometer.
+void ekf_alignYawGPS(void)
+{
+    if ((sq(velNED.v[0]) + sq(velNED.v[1])) > 16.0f) {
+        float roll;
+        float pitch;
+        float oldYaw;
+        float newYaw;
+        float yawErr;
+
+        // get quaternion from existing filter states and calculate roll, pitch and yaw angles
+        quaternion_to_euler(state->quat, &roll, &pitch, &oldYaw);
+
+        // calculate yaw angle from GPS velocity
+        newYaw = atan2f(velNED.v[1], velNED.v[0]);
+
+        // modify yaw angle using GPS ground course if more than 45 degrees away or if not previously aligned
+        yawErr = fabsf(newYaw - oldYaw);
+
+        if (((yawErr > 0.7854f) && (yawErr < 5.4978f)) || !yawAligned) {
+            // calculate new filter quaternion states from Euler angles
+            quaternion_from_euler(&state->quat, roll, pitch, newYaw);
+
+            // the yaw angle is now aligned so update its status
+            yawAligned =  true;
+
+            // set the velocity states
+            state->velocity.x = velNED.x;
+            state->velocity.y = velNED.y;
+
+            // reinitialise the quaternion, velocity and position covariances
+            // zero the matrix entries
+            ekf_zeroRows(P, 0, 9);
+            ekf_zeroCols(P, 0, 9);
+
+            // quaternions - TODO maths that sets them based on different roll, yaw and pitch uncertainties
+            P[0][0]   = 1.0e-9f;
+            P[1][1]   = 0.25f*sq(DEGREES_TO_RADIANS(1.0f));
+            P[2][2]   = 0.25f*sq(DEGREES_TO_RADIANS(1.0f));
+            P[3][3]   = 0.25f*sq(DEGREES_TO_RADIANS(1.0f));
+            // velocities - we could have a big error coming out of static mode due to GPS lag
+            P[4][4]   = 400.0f;
+            P[5][5]   = P[4][4];
+            P[6][6]   = sq(0.7f);
+            // positions - we could have a big error coming out of static mode due to GPS lag
+            P[7][7]   = 400.0f;
+            P[8][8]   = P[7][7];
+            P[9][9]   = sq(5.0f);
+        }
+    }
+}
+
 // Check for filter divergence
 void ekf_checkDivergence(void)
 {
@@ -3811,7 +3889,7 @@ void ekf_checkDivergence(void)
 
 // calculate whether the flight vehicle is on the ground or flying from height,
 // airspeed and GPS speed
-void ekf_SetFlightAndFusionModes(void)
+void ekf_OnGroundCheck(void)
 {
     uint8_t highAirSpd = CENTIMETERS_TO_METERS(getAirspeedEstimate()) > 8.0f;
     float gndSpdSq = sq(velNED.v[0]) + sq(velNED.v[1]);
@@ -3836,7 +3914,7 @@ void ekf_SetFlightAndFusionModes(void)
     // is timed out and we are a fly forward vehicle
     if (!onGround && prevOnGround &&
         (!ekf_use_compass() || (magTimeout && STATE(FIXED_WING_LEGACY)))) {
-        // alignYawGPS();
+        ekf_alignYawGPS();
     }
 
     // If we are flying a fly-forward type vehicle without an airspeed sensor
@@ -3852,13 +3930,25 @@ void ekf_SetFlightAndFusionModes(void)
 
     // store current on-ground status for next time
     prevOnGround = onGround;
+
     // If we are on ground, or in static mode, or don't have the right vehicle
     // and sensing to estimate wind, inhibit wind states
     inhibitWindStates = ((!ekf_useAirspeed() && !STATE(FIXED_WING_LEGACY)) ||
                          onGround || staticMode);
+
     // If magnetometer calibration mode is turned off by the user or we are on
     // ground or in static mode, then inhibit magnetometer states
     inhibitMagStates = (!ekf_use_compass() || onGround || staticMode);
+}
+
+bool FLAG_ARMED = false;
+
+// return true if the vehicle code has requested use of static mode
+// in static mode, position and height are constrained to zero, allowing an attitude
+// reference to be initialised and maintained when on the ground and without GPS lock
+bool ekf_static_mode_demanded(void)
+{
+    return !FLAG_ARMED;
 }
 
 // Update Filter States - this should be called whenever new IMU data is
@@ -3895,12 +3985,15 @@ void ekf_UpdateFilter(void)
     }
 
     // check if on ground
-    ekf_SetFlightAndFusionModes();
+    ekf_OnGroundCheck();
 
     // define rules used to set staticMode
-    // staticMode enables ground operation without GPS by fusing zeros for
-    // position and height measurements
-    // staticMode = !ARMING_FLAG(ARMED);
+    // staticMode enables ground operation without GPS by fusing zeros for position and height measurements
+    if (ekf_static_mode_demanded()) {
+        staticMode = true;
+    } else {
+        staticMode = false;
+    }
 
     // check to see if static mode has changed and reset states if it has
     if (prevStaticMode != staticMode) {
@@ -3994,7 +4087,10 @@ void ekf_update(float deltaTime)
         }
     }
 
-    DEBUG_SET(DEBUG_CRUISE, 7, system_using_EKF());
+    DEBUG_SET(DEBUG_CRUISE, 4, posTimeout);
+    DEBUG_SET(DEBUG_CRUISE, 5, velTimeout);
+    DEBUG_SET(DEBUG_CRUISE, 6, hgtTimeout);
+    DEBUG_SET(DEBUG_CRUISE, 7, filterDiverged);
 
     if (ekf_started) {
         ekf_UpdateFilter();
@@ -4014,7 +4110,7 @@ void ekf_update(float deltaTime)
             }
 
             if (millis() - start_time_ms > 30000) {
-                staticMode = false;
+                FLAG_ARMED = true;
             }
 
             attitude.values.roll = roll_sensor;

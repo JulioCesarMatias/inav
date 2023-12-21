@@ -9,7 +9,8 @@
         "__locale": "c",
         "regex": "c",
         "string": "c",
-        "string_view": "c"
+        "string_view": "c",
+        "ekf.h": "c"
     },
     "editor.tabSize": 4,
     "editor.insertSpaces": true,
