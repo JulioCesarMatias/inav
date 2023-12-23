@@ -28,7 +28,7 @@ typedef struct magDev_s {
     struct {
         bool useExternal;
         union {
-            fpMat3_t externalRotation;
+            fpMatrix3_t externalRotation;
             sensor_align_e onBoard;
         };
     } magAlign;

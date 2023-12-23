@@ -15,6 +15,8 @@
  * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Extended Kalman Filter ported from ArduPilot to INAV by Julio Cesar Matias
+
 #pragma GCC optimize("O3")
 
 #include "navigation/ekf.h"
@@ -23,6 +25,7 @@
 #include "common/quaternion.h"
 #include "common/vector.h"
 #include "drivers/time.h"
+#include "fc/config.h"
 #include "fc/runtime_config.h"
 #include "flight/imu.h"
 #include "io/gps.h"
@@ -36,18 +39,8 @@
 #include "sensors/barometer.h"
 #include "sensors/gyro.h"
 #include "sensors/pitotmeter.h"
-#include "fc/config.h"
 
-typedef union
-{
-    float v[2];
-    struct
-    {
-        float x, y;
-    };
-} fpVector2_t;
-
-float states[31];         // EKF of 31 states
+float states[31];  // EKF of 31 states
 typedef struct
 {
     fpQuaternion_t quat;         // 0..3
@@ -79,7 +72,7 @@ typedef struct
 #define IGNORE_COMPASS_EKF
 
 // earth rotation rate (rad/sec)
-#define EARTHRATE 0.000072921f
+#define EARTH_RATE 0.000072921f
 
 // maximum value for any element in the covariance matrix
 #define EKF_COVARIENCE_MAX 1.0e8f
@@ -89,7 +82,8 @@ typedef struct
 
 fault_status_t faultStatus;
 
-state_elements_t *state = (state_elements_t *)states; // Casting of the 31 states
+state_elements_t *state =
+    (state_elements_t *)states;  // Casting of the 31 states
 state_elements_t
     storedStates[50];  // state vectors stored for the last 50 time steps
 state_elements_t
@@ -139,8 +133,8 @@ fpVector3_t velDotNED;      // rate of change of velocity in NED frame
 fpVector3_t velDotNEDfilt;  // low pass filtered velDotNED
 fpVector3_t earthRateNED;   // earths angular rate vector in NED (rad/s)
 
-fpMat3_t prevTnb;  // previous nav to body transformation used for INS earth
-                   // rotation compensation
+fpMatrix3_t prevTnb;  // previous nav to body transformation used for INS earth
+                      // rotation compensation
 
 float Kfusion[31];    // Kalman gain vector
 float P[22][22];      // covariance matrix
@@ -257,7 +251,7 @@ float magIncrStateDelta[10];  // vector of corrections to attitude, velocity and
 float magUpdateCountMaxInv;   // floating point inverse of magFilterCountMax
 float gpsUpdateCountMaxInv;   // floating point inverse of gpsFilterCountMax
 float hgtUpdateCountMaxInv;   // floating point inverse of hgtFilterCountMax
-float gpsNoiseScaler = 1.0f;         // Used to scale the  GPS measurement noise and
+float gpsNoiseScaler = 1.0f;  // Used to scale the  GPS measurement noise and
 // consistency gates to compensate for operation with
 // small satellite counts
 float scaledDeltaGyrBiasLgth;  // scaled delta gyro bias vector length used to
@@ -455,132 +449,33 @@ bool ekf_use_compass(void)
     return false;
 }
 
-static bool is_zero(const float x)
+// zero specified range of rows in the state covariance matrix
+void ekf_zeroRows(float covMat[22][22], uint8_t first, uint8_t last)
 {
-    // zero check
-    return fabsf(x) < 1.19209290e-7F;
-}
-
-void quaternion_normalize(fpQuaternion_t *q)
-{
-    const float quatMag = sqrtf(sq(q->q0) + sq(q->q1) + sq(q->q2) + sq(q->q3));
-
-    if (!is_zero(quatMag)) {
-        const float quatMagInv = 1.0f / quatMag;
-        q->q0 *= quatMagInv;
-        q->q1 *= quatMagInv;
-        q->q2 *= quatMagInv;
-        q->q3 *= quatMagInv;
+    uint8_t row;
+    for (row = first; row <= last; row++) {
+        memset(&covMat[row][0], 0, sizeof(covMat[0][0]) * 22);
     }
 }
 
-// populate the supplied rotation matrix equivalent from this quaternion
-void quaternion_to_rotation_matrix(fpQuaternion_t q, fpMat3_t *m)
+// zero specified range of columns in the state covariance matrix
+void ekf_zeroCols(float covMat[22][22], uint8_t first, uint8_t last)
 {
-    const float q3q3 = q.q2 * q.q2;
-    const float q3q4 = q.q2 * q.q3;
-    const float q2q2 = q.q1 * q.q1;
-    const float q2q3 = q.q1 * q.q2;
-    const float q2q4 = q.q1 * q.q3;
-    const float q1q2 = q.q0 * q.q1;
-    const float q1q3 = q.q0 * q.q2;
-    const float q1q4 = q.q0 * q.q3;
-    const float q4q4 = q.q3 * q.q3;
-
-    m->m[0][0] = 1.0f - 2.0f * (q3q3 + q4q4);
-    m->m[0][1] = 2.0f * (q2q3 - q1q4);
-    m->m[0][2] = 2.0f * (q2q4 + q1q3);
-    m->m[1][0] = 2.0f * (q2q3 + q1q4);
-    m->m[1][1] = 1.0f - 2.0f * (q2q2 + q4q4);
-    m->m[1][2] = 2.0f * (q3q4 - q1q2);
-    m->m[2][0] = 2.0f * (q2q4 - q1q3);
-    m->m[2][1] = 2.0f * (q3q4 + q1q2);
-    m->m[2][2] = 1.0f - 2.0f * (q2q2 + q3q3);
+    uint8_t row;
+    for (row = 0; row <= 21; row++) {
+        memset(&covMat[row][first], 0,
+               sizeof(covMat[0][0]) * (1 + last - first));
+    }
 }
 
-// create a quaternion from Euler angles
-void quaternion_from_euler(fpQuaternion_t *q, float roll, float pitch,
-                           float yaw)
+// calculate the NED earth spin vector in rad/sec
+void ekf_calcEarthRateNED(fpVector3_t *omega, float latitude)
 {
-    const float cr2 = cos(roll * 0.5f);
-    const float cp2 = cos(pitch * 0.5f);
-    const float cy2 = cos(yaw * 0.5f);
-    const float sr2 = sin(roll * 0.5f);
-    const float sp2 = sin(pitch * 0.5f);
-    const float sy2 = sin(yaw * 0.5f);
-
-    q->q0 = cr2 * cp2 * cy2 + sr2 * sp2 * sy2;
-    q->q1 = sr2 * cp2 * cy2 - cr2 * sp2 * sy2;
-    q->q2 = cr2 * sp2 * cy2 + sr2 * cp2 * sy2;
-    q->q3 = cr2 * cp2 * sy2 - sr2 * sp2 * cy2;
+    float lat_rad = DEGREES_TO_RADIANS(latitude);
+    omega->x = EARTH_RATE * cosf(lat_rad);
+    omega->y = 0.0f;
+    omega->z = -EARTH_RATE * sinf(lat_rad);
 }
-
-void quaternion_to_euler(fpQuaternion_t q, float *roll, float *pitch,
-                         float *yaw)
-{
-    *roll = atan2f(2.0f * (q.q0 * q.q1 + q.q2 * q.q3),
-                   1.0f - 2.0f * (q.q1 * q.q1 + q.q2 * q.q2));
-    *pitch = asin(2.0f * (q.q0 * q.q2 - q.q3 * q.q1));
-    *yaw = -atan2f(2.0f * (q.q0 * q.q3 + q.q1 * q.q2),
-                  1.0f - 2.0f * (q.q2 * q.q2 + q.q3 * q.q3));
-}
-
-// vector cross product
-fpVector3_t get_vector_cross_product(const fpVector3_t v1, const fpVector3_t v2)
-{
-    fpVector3_t temp;
-
-    temp.x = v1.y * v2.z - v1.z * v2.y;
-    temp.y = v1.z * v2.x - v1.x * v2.z;
-    temp.z = v1.x * v2.y - v1.y * v2.x;
-
-    return temp;
-}
-
-// matrix multiplication by a vector
-fpVector3_t multiply_matrix_by_vector(fpMat3_t m, fpVector3_t v)
-{
-    fpVector3_t vRet;
-
-    vRet.x = m.m[0][0] * v.x + m.m[0][1] * v.y + m.m[0][2] * v.z;
-    vRet.y = m.m[1][0] * v.x + m.m[1][1] * v.y + m.m[1][2] * v.z;
-    vRet.z = m.m[2][0] * v.x + m.m[2][1] * v.y + m.m[2][2] * v.z;
-
-    return vRet;
-}
-
-void matrix_from_euler(fpMat3_t *m, float roll, float pitch, float yaw)
-{
-    const float cp = cos(pitch);
-    const float sp = sin(pitch);
-    const float sr = sin(roll);
-    const float cr = cos(roll);
-    const float sy = sin(yaw);
-    const float cy = cos(yaw);
-
-    m->m[0][0] = cp * cy;
-    m->m[0][1] = (sr * sp * cy) - (cr * sy);
-    m->m[0][2] = (cr * sp * cy) + (sr * sy);
-    m->m[1][0] = cp * sy;
-    m->m[1][1] = (sr * sp * sy) + (cr * cy);
-    m->m[1][2] = (cr * sp * sy) - (sr * cy);
-    m->m[2][0] = -sp;
-    m->m[2][1] = sr * cp;
-    m->m[2][2] = cr * cp;
-}
-
-fpMat3_t matrix_transposed(const fpMat3_t matrix) {
-    fpMat3_t result = {
-        {
-            {matrix.m[0][0], matrix.m[1][0], matrix.m[2][0]},
-            {matrix.m[0][1], matrix.m[1][1], matrix.m[2][1]},
-            {matrix.m[0][2], matrix.m[1][2], matrix.m[2][2]}
-        }
-    };
-
-    return result;
-}
-
 
 // recall state vector stored at closest time to the one specified by msec
 void ekf_RecallStates(state_elements_t *statesForFusion, uint32_t msec)
@@ -607,26 +502,6 @@ void ekf_RecallStates(state_elements_t *statesForFusion, uint32_t msec)
     }
 }
 
-// zero specified range of rows in the state covariance matrix
-void ekf_zeroRows(float covMat[22][22], uint8_t first, uint8_t last)
-{
-    uint8_t row;
-    for (row = first; row <= last; row++)
-    {
-        memset(&covMat[row][0], 0, sizeof(covMat[0][0]) * 22);
-    }
-}
-
-// zero specified range of columns in the state covariance matrix
-void ekf_zeroCols(float covMat[22][22], uint8_t first, uint8_t last)
-{
-    uint8_t row;
-    for (row = 0; row <= 21; row++)
-    {
-        memset(&covMat[row][first], 0, sizeof(covMat[0][0]) * (1 + last - first));
-    }
-}
-
 // update IMU delta angle and delta velocity measurements
 void ekf_readIMUData(void)
 {
@@ -641,32 +516,35 @@ void ekf_readIMUData(void)
     // filter
     imuSampleTime_ms = millis();
 
-    accGetMeasuredAcceleration(
-        &accel1);  // Calculate accel in body frame in cm/s
+    // accGetMeasuredAcceleration(&accel1);  // Calculate accel in body frame in
+    // cm/s
+    arm_scale_f32(acc.accADCf, GRAVITY_MSS, accel1.v, XYZ_AXIS_COUNT);
     gyroGetMeasuredRotationRate(
         &angRate);  // Calculate gyro rate in body frame in rad/s
 
-    accel1.x = CENTIMETERS_TO_METERS(accel1.x);
-    accel1.y = CENTIMETERS_TO_METERS(accel1.y);
-    accel1.z = CENTIMETERS_TO_METERS(accel1.z);
     accel2 = accel1;
 
     // trapezoidal integration
+    // blended gyro
     dAngIMU.x = (angRate.x + lastAngRate.x) * dtIMU * 0.5f;
     dAngIMU.y = (angRate.y + lastAngRate.y) * dtIMU * 0.5f;
     dAngIMU.z = (angRate.z + lastAngRate.z) * dtIMU * 0.5f;
     lastAngRate.x = angRate.x;
     lastAngRate.y = angRate.y;
     lastAngRate.z = angRate.z;
+    
+    // accel IMU1
     dVelIMU1.x = (accel1.x + lastAccel1.x) * dtIMU * 0.5f;
     dVelIMU1.y = (accel1.y + lastAccel1.y) * dtIMU * 0.5f;
     dVelIMU1.z = (accel1.z + lastAccel1.z) * dtIMU * 0.5f;
     lastAccel1.x = accel1.x;
     lastAccel1.y = accel1.y;
     lastAccel1.z = accel1.z;
+
+    // accel IMU2
     dVelIMU2.x = (accel2.x + lastAccel2.x) * dtIMU * 0.5f;
     dVelIMU2.y = (accel2.y + lastAccel2.y) * dtIMU * 0.5f;
-    dVelIMU2.z = (accel2.z + lastAccel2.x) * dtIMU * 0.5f;
+    dVelIMU2.z = (accel2.z + lastAccel2.z) * dtIMU * 0.5f;
     lastAccel2.x = accel2.x;
     lastAccel2.y = accel2.y;
     lastAccel2.z = accel2.z;
@@ -748,16 +626,17 @@ void ekf_readGpsData(void)
                           (int16_t)constrainf(_msecPosDelay, 0.0f, 500.0f)));
 
         // read the NED velocity from the GPS
-        velNED.x = gpsSol.velNED[X] * 0.01f;
-        velNED.y = gpsSol.velNED[Y] * 0.01f;
-        velNED.z = gpsSol.velNED[Z] * 0.01f;
+        velNED.x = CENTIMETERS_TO_METERS(gpsSol.velNED[X]);
+        velNED.y = CENTIMETERS_TO_METERS(gpsSol.velNED[Y]);
+        velNED.z = CENTIMETERS_TO_METERS(gpsSol.velNED[Z]);
 
         // read latitutde and longitude from GPS and convert to NE position
         if (!ekfOrigin.valid) {
             geoSetOrigin(&ekfOrigin, &gpsSol.llh, GEO_ORIGIN_SET);
         } else {
-            geoConvertGeodeticToLocal(&gpsPosNE, &ekfOrigin, &gpsSol.llh,
-                                      GEO_ALT_ABSOLUTE);
+            geoConvertGeodeticToLocal(&gpsPosNE, &ekfOrigin, &gpsSol.llh, GEO_ALT_ABSOLUTE);
+            // define Earth rotation vector in the NED navigation frame
+            ekf_calcEarthRateNED(&earthRateNED, posControl.rthState.homePosition.pos.x);
         }
 
         // decay and limit the position offset which is applied to NE position
@@ -778,9 +657,9 @@ void ekf_ResetPosition(void)
         ekf_readGpsData();
         // write to state vector and compensate for GPS latency
         state->position.x = gpsPosNE.x + gpsPosGlitchOffsetNE.x +
-                           0.001f * velNED.x * _msecPosDelay;
+                            0.001f * velNED.x * _msecPosDelay;
         state->position.y = gpsPosNE.y + gpsPosGlitchOffsetNE.y +
-                           0.001f * velNED.y * _msecPosDelay;
+                            0.001f * velNED.y * _msecPosDelay;
     }
     // stored horizontal position states to prevent subsequent GPS measurements
     // from being rejected
@@ -863,8 +742,8 @@ bool ekf_healthy(void)
         return false;
     }
 
-    if (isnan(state->quat.q0) || isnan(state->quat.q1) || isnan(state->quat.q2) ||
-        isnan(state->quat.q3)) {
+    if (isnan(state->quat.q0) || isnan(state->quat.q1) ||
+        isnan(state->quat.q2) || isnan(state->quat.q3)) {
         return false;
     }
 
@@ -1004,13 +883,13 @@ fpQuaternion_t ekf_calcQuatAndFieldStates(float roll, float pitch)
     // declare local variables required to calculate initial orientation and
     // magnetic field
     float yaw;
-    fpMat3_t Tbn;
+    fpMatrix3_t Tbn;
     fpVector3_t initMagNED;
     fpQuaternion_t initQuat;
 
     if (ekf_use_compass()) {
         // calculate rotation matrix from body to NED frame
-        matrix_from_euler(&Tbn, roll, pitch, 0.0f);
+        matrixFromEuler(&Tbn, roll, pitch, 0.0f);
 
         // read the magnetometer data
         ekf_readMagData();
@@ -1019,7 +898,7 @@ fpQuaternion_t ekf_calcQuatAndFieldStates(float roll, float pitch)
         const fpVector3_t vecMagData = {.v = {magData.x - magBias.x,
                                               magData.y - magBias.y,
                                               magData.z - magBias.z}};
-        initMagNED = multiply_matrix_by_vector(Tbn, vecMagData);
+        initMagNED = multiplyMatrixByVector(Tbn, vecMagData);
 
         // calculate heading of mag field rel to body heading
         float magHeading = atan2f(initMagNED.y, initMagNED.x);
@@ -1032,38 +911,29 @@ fpQuaternion_t ekf_calcQuatAndFieldStates(float roll, float pitch)
         yawAligned = true;
 
         // calculate initial filter quaternion states
-        quaternion_from_euler(&initQuat, roll, pitch, yaw);
+        quaternionFromEuler(&initQuat, roll, pitch, yaw);
 
         // calculate initial Tbn matrix and rotate Mag measurements into NED
         // to set initial NED magnetic field states
-        quaternion_to_rotation_matrix(initQuat, &Tbn);
+        quaternionToRotationMatrix(initQuat, &Tbn);
 
         // write to earth magnetic field state vector
-        state->earth_magfield = multiply_matrix_by_vector(Tbn, vecMagData);
+        state->earth_magfield = multiplyMatrixByVector(Tbn, vecMagData);
     } else {
-        quaternion_from_euler(&initQuat, roll, pitch, 0.0f);
+        quaternionFromEuler(&initQuat, roll, pitch, 0.0f);
         yawAligned = false;
     }
 
 #else
 
     fpQuaternion_t initQuat;
-    quaternion_from_euler(&initQuat, roll, pitch, 0.0f);
+    quaternionFromEuler(&initQuat, roll, pitch, 0.0f);
     yawAligned = false;
 
 #endif
 
     // return attitude quaternion
     return initQuat;
-}
-
-// calculate the NED earth spin vector in rad/sec
-void ekf_calcEarthRateNED(fpVector3_t *omega, float latitude)
-{
-    float lat_rad = DEGREES_TO_RADIANS(latitude);
-    omega->x = EARTHRATE * cosf(lat_rad);
-    omega->y = 0.0f;
-    omega->z = -EARTHRATE * sinf(lat_rad);
 }
 
 // this function is used to initialise the filter whilst moving, using the AHRS
@@ -1077,7 +947,7 @@ void ekf_InitialiseFilterDynamic(void)
 
     // Set re-used variables to zero
     ekf_ZeroVariables();
-    
+
     // This should be a multiple of the imu update interval.
     dtVelPos = US2S(getLooptime()) * 2.0f;
 
@@ -1112,9 +982,6 @@ void ekf_InitialiseFilterDynamic(void)
 
     // initialise the covariance matrix
     ekf_CovarianceInit();
-
-    // define Earth rotation vector in the NED navigation frame
-    ekf_calcEarthRateNED(&earthRateNED, posControl.rthState.homePosition.pos.x);
 
     // initialise IMU pre-processing states
     ekf_readIMUData();
@@ -1634,7 +1501,7 @@ void ekf_FuseVelPosNED(void)
                     }
                 }
 
-                quaternion_normalize(&state->quat);
+                quaternionNormalize(&state->quat, &state->quat);
 
                 // update the covariance - take advantage of direct observation
                 // of a single state at index = stateIndex to reduce
@@ -1692,7 +1559,6 @@ void ekf_SelectVelPosFusion(void)
             fuseVelData = false;
             fusePosData = false;
         }
-
     } else {
         // in static mode use synthetic position measurements set to zero
         // only fuse synthetic measurements when rate of change of velocity is
@@ -1737,6 +1603,7 @@ void ekf_SelectVelPosFusion(void)
             states[i] += gpsIncrStateDelta[i];
         }
     }
+
     if (hgtUpdateCount < hgtUpdateCountMax) {
         hgtUpdateCount++;
         for (uint8_t i = 0; i <= 9; i++) {
@@ -1762,7 +1629,7 @@ void ekf_UpdateStrapdownEquationsNED(void)
     fpVector3_t gravityNED;    // NED gravity vector m/s^2
     gravityNED.x = 0;
     gravityNED.y = 0;
-    gravityNED.z = GRAVITY_MSS;
+    gravityNED.z = -GRAVITY_MSS;
 
     // remove sensor bias errors
     correctedDelAng.x = dAngIMU.x - state->gyro_bias.x;
@@ -1785,15 +1652,20 @@ void ekf_UpdateStrapdownEquationsNED(void)
     prevDelAng = correctedDelAng;
 
     // apply corrections for earths rotation rate and coning errors
-    const fpVector3_t delAngCrossProduct =
-        get_vector_cross_product(prevDelAng, correctedDelAng);
-    const fpVector3_t earthNED =
-        multiply_matrix_by_vector(prevTnb, earthRateNED);
+    fpVector3_t delAngCrossProduct;
+    vectorCrossProduct(&delAngCrossProduct, &prevDelAng, &correctedDelAng);
+
+    const fpVector3_t earthNED = multiplyMatrixByVector(prevTnb, earthRateNED);
+
     const fpVector3_t nedRate = {
         .v = {earthNED.x * dtIMU, earthNED.y * dtIMU, earthNED.z * dtIMU}};
-    correctedDelAng.x = correctedDelAng.x - nedRate.x + delAngCrossProduct.x * 8.333333e-2f;
-    correctedDelAng.y = correctedDelAng.y - nedRate.y + delAngCrossProduct.y * 8.333333e-2f;
-    correctedDelAng.z = correctedDelAng.z - nedRate.z + delAngCrossProduct.z * 8.333333e-2f;
+
+    correctedDelAng.x =
+        correctedDelAng.x - nedRate.x + delAngCrossProduct.x * 8.333333e-2f;
+    correctedDelAng.y =
+        correctedDelAng.y - nedRate.y + delAngCrossProduct.y * 8.333333e-2f;
+    correctedDelAng.z =
+        correctedDelAng.z - nedRate.z + delAngCrossProduct.z * 8.333333e-2f;
 
     // convert the rotation vector to its equivalent quaternion
     rotationMag = calc_length_pythagorean_3D(
@@ -1824,35 +1696,38 @@ void ekf_UpdateStrapdownEquationsNED(void)
                   states[1] * deltaQuat.q2 - states[2] * deltaQuat.q1;
 
     // normalise the quaternions and update the quaternion states
-    quaternion_normalize(&qUpdated);
+    quaternionNormalize(&qUpdated, &qUpdated);
     state->quat = qUpdated;
 
     // calculate the body to nav cosine matrix
-    fpMat3_t Tbn_temp;
-    quaternion_to_rotation_matrix(state->quat, &Tbn_temp);
-    prevTnb = matrix_transposed(Tbn_temp);
-    
+    fpMatrix3_t Tbn_temp;
+    quaternionToRotationMatrix(state->quat, &Tbn_temp);
+    prevTnb = matrixTransposed(Tbn_temp);
+
     // transform body delta velocities to delta velocities in the nav frame
     // * and + operators have been overloaded
     // blended IMU calc
-    const fpVector3_t dtVel12 = {
-        .v = {correctedDelVel12.x + gravityNED.x * dtIMU,
-              correctedDelVel12.y + gravityNED.y * dtIMU,
-              correctedDelVel12.z + gravityNED.z * dtIMU}};
-    delVelNav = multiply_matrix_by_vector(Tbn_temp, dtVel12);
+    const fpVector3_t dtGravity = {.v = {gravityNED.x * dtIMU,
+                                         gravityNED.y * dtIMU,
+                                         gravityNED.z * dtIMU}};
 
-    // single IMU calcs
-    const fpVector3_t dtVel1 = {
-        .v = {correctedDelVel1.x + gravityNED.x * dtIMU,
-              correctedDelVel1.y + gravityNED.y * dtIMU,
-              correctedDelVel1.z + gravityNED.z * dtIMU}};
-    delVelNav1 = multiply_matrix_by_vector(Tbn_temp, dtVel1);
+    // blended
+    delVelNav = multiplyMatrixByVector(Tbn_temp, correctedDelVel12);
+    delVelNav.x += dtGravity.x;
+    delVelNav.y += dtGravity.y;
+    delVelNav.z += dtGravity.z;
 
-    const fpVector3_t dtVel2 = {
-        .v = {correctedDelVel2.x + gravityNED.x * dtIMU,
-              correctedDelVel2.y + gravityNED.y * dtIMU,
-              correctedDelVel2.z + gravityNED.z * dtIMU}};
-    delVelNav2 = multiply_matrix_by_vector(Tbn_temp, dtVel2);
+    // IMU1
+    delVelNav1 = multiplyMatrixByVector(Tbn_temp, correctedDelVel1);
+    delVelNav1.x += dtGravity.x;
+    delVelNav1.y += dtGravity.y;
+    delVelNav1.z += dtGravity.z;
+
+    // IMU2
+    delVelNav2 = multiplyMatrixByVector(Tbn_temp, correctedDelVel2);
+    delVelNav2.x += dtGravity.x;
+    delVelNav2.y += dtGravity.y;
+    delVelNav2.z += dtGravity.z;
 
     // calculate the rate of change of velocity (used for launch detect and
     // other functions)
@@ -1873,9 +1748,12 @@ void ekf_UpdateStrapdownEquationsNED(void)
         calc_length_pythagorean_2D(velDotNEDfilt.x, velDotNEDfilt.y);
 
     // save velocity for use in trapezoidal intergration for position calcuation
-    const fpVector3_t lastVelocity = {.v = {state->velocity.x, state->velocity.y, state->velocity.z}};
-    const fpVector3_t lastVel1 = {.v = {state->vel1.x, state->vel1.y, state->vel1.z}};
-    const fpVector3_t lastVel2 = {.v = {state->vel2.x, state->vel2.y, state->vel2.z}};
+    const fpVector3_t lastVelocity = {
+        .v = {state->velocity.x, state->velocity.y, state->velocity.z}};
+    const fpVector3_t lastVel1 = {
+        .v = {state->vel1.x, state->vel1.y, state->vel1.z}};
+    const fpVector3_t lastVel2 = {
+        .v = {state->vel2.x, state->vel2.y, state->vel2.z}};
 
     // sum delta velocities to get velocity
     state->velocity.x += delVelNav.x;
@@ -3801,8 +3679,9 @@ void ekf_CovariancePrediction(void)
     ekf_ConstrainVariances();
 }
 
-// this function is used to do a forced alignment of the yaw angle to aligwith the horizontal velocity
-// vector from GPS. It is used to align the yaw angle after launch or takeoff without a magnetometer.
+// this function is used to do a forced alignment of the yaw angle to aligwith
+// the horizontal velocity vector from GPS. It is used to align the yaw angle
+// after launch or takeoff without a magnetometer.
 void ekf_alignYawGPS(void)
 {
     if ((sq(velNED.v[0]) + sq(velNED.v[1])) > 16.0f) {
@@ -3812,21 +3691,23 @@ void ekf_alignYawGPS(void)
         float newYaw;
         float yawErr;
 
-        // get quaternion from existing filter states and calculate roll, pitch and yaw angles
-        quaternion_to_euler(state->quat, &roll, &pitch, &oldYaw);
+        // get quaternion from existing filter states and calculate roll, pitch
+        // and yaw angles
+        quaternionToEuler(state->quat, &roll, &pitch, &oldYaw);
 
         // calculate yaw angle from GPS velocity
         newYaw = atan2f(velNED.v[1], velNED.v[0]);
 
-        // modify yaw angle using GPS ground course if more than 45 degrees away or if not previously aligned
+        // modify yaw angle using GPS ground course if more than 45 degrees away
+        // or if not previously aligned
         yawErr = fabsf(newYaw - oldYaw);
 
         if (((yawErr > 0.7854f) && (yawErr < 5.4978f)) || !yawAligned) {
             // calculate new filter quaternion states from Euler angles
-            quaternion_from_euler(&state->quat, roll, pitch, newYaw);
+            quaternionFromEuler(&state->quat, roll, pitch, newYaw);
 
             // the yaw angle is now aligned so update its status
-            yawAligned =  true;
+            yawAligned = true;
 
             // set the velocity states
             state->velocity.x = velNED.x;
@@ -3837,19 +3718,22 @@ void ekf_alignYawGPS(void)
             ekf_zeroRows(P, 0, 9);
             ekf_zeroCols(P, 0, 9);
 
-            // quaternions - TODO maths that sets them based on different roll, yaw and pitch uncertainties
-            P[0][0]   = 1.0e-9f;
-            P[1][1]   = 0.25f*sq(DEGREES_TO_RADIANS(1.0f));
-            P[2][2]   = 0.25f*sq(DEGREES_TO_RADIANS(1.0f));
-            P[3][3]   = 0.25f*sq(DEGREES_TO_RADIANS(1.0f));
-            // velocities - we could have a big error coming out of static mode due to GPS lag
-            P[4][4]   = 400.0f;
-            P[5][5]   = P[4][4];
-            P[6][6]   = sq(0.7f);
-            // positions - we could have a big error coming out of static mode due to GPS lag
-            P[7][7]   = 400.0f;
-            P[8][8]   = P[7][7];
-            P[9][9]   = sq(5.0f);
+            // quaternions - TODO maths that sets them based on different roll,
+            // yaw and pitch uncertainties
+            P[0][0] = 1.0e-9f;
+            P[1][1] = 0.25f * sq(DEGREES_TO_RADIANS(1.0f));
+            P[2][2] = 0.25f * sq(DEGREES_TO_RADIANS(1.0f));
+            P[3][3] = 0.25f * sq(DEGREES_TO_RADIANS(1.0f));
+            // velocities - we could have a big error coming out of static mode
+            // due to GPS lag
+            P[4][4] = 400.0f;
+            P[5][5] = P[4][4];
+            P[6][6] = sq(0.7f);
+            // positions - we could have a big error coming out of static mode
+            // due to GPS lag
+            P[7][7] = 400.0f;
+            P[8][8] = P[7][7];
+            P[9][9] = sq(5.0f);
         }
     }
 }
@@ -3944,10 +3828,12 @@ void ekf_OnGroundCheck(void)
 bool FLAG_ARMED = false;
 
 // return true if the vehicle code has requested use of static mode
-// in static mode, position and height are constrained to zero, allowing an attitude
-// reference to be initialised and maintained when on the ground and without GPS lock
+// in static mode, position and height are constrained to zero, allowing an
+// attitude reference to be initialised and maintained when on the ground and
+// without GPS lock
 bool ekf_static_mode_demanded(void)
 {
+    // return the flag !state
     return !FLAG_ARMED;
 }
 
@@ -3988,7 +3874,8 @@ void ekf_UpdateFilter(void)
     ekf_OnGroundCheck();
 
     // define rules used to set staticMode
-    // staticMode enables ground operation without GPS by fusing zeros for position and height measurements
+    // staticMode enables ground operation without GPS by fusing zeros for
+    // position and height measurements
     if (ekf_static_mode_demanded()) {
         staticMode = true;
     } else {
@@ -4012,12 +3899,12 @@ void ekf_UpdateFilter(void)
     ekf_StoreStates();
 
     // sum delta angles and time used by covariance prediction
-    summedDelAng.x = summedDelAng.x + correctedDelAng.x;
-    summedDelAng.y = summedDelAng.y + correctedDelAng.y;
-    summedDelAng.z = summedDelAng.z + correctedDelAng.z;
-    summedDelVel.x = summedDelVel.x + correctedDelVel1.x;
-    summedDelVel.y = summedDelVel.y + correctedDelVel1.y;
-    summedDelVel.z = summedDelVel.z + correctedDelVel1.z;
+    summedDelAng.x += correctedDelAng.x;
+    summedDelAng.y += correctedDelAng.y;
+    summedDelAng.z += correctedDelAng.z;
+    summedDelVel.x += correctedDelVel1.x;
+    summedDelVel.y += correctedDelVel1.y;
+    summedDelVel.z += correctedDelVel1.z;
     dt += dtIMU;
 
     // perform a covariance prediction if the total delta angle has exceeded the
@@ -4040,15 +3927,15 @@ void ekf_UpdateFilter(void)
 }
 
 // return the transformation matrix from XYZ (body) to NED axes
-void ekf_getRotationBodyToNED(fpMat3_t *mat)
+void ekf_getRotationBodyToNED(fpMatrix3_t *mat)
 {
-    quaternion_to_rotation_matrix(state->quat, mat);
+    quaternionToRotationMatrix(state->quat, mat);
 }
 
 // return the Euler roll, pitch and yaw angle in radians
 void ekf_getEulerAngles(fpVector3_t *euler)
 {
-    quaternion_to_euler(state->quat, &euler->x, &euler->y, &euler->z);
+    quaternionToEuler(state->quat, &euler->x, &euler->y, &euler->z);
 }
 
 // return NED velocity in cm/s
@@ -4101,21 +3988,17 @@ void ekf_update(float deltaTime)
 
             ekf_getEulerAngles(&eulers);
 
-            int32_t roll_sensor = RADIANS_TO_DECIDEGREES(eulers.x);
-            int32_t pitch_sensor = RADIANS_TO_DECIDEGREES(eulers.y);
-            int32_t yaw_sensor = RADIANS_TO_DECIDEGREES(eulers.z);
+            attitude.values.roll = RADIANS_TO_DECIDEGREES(eulers.x);
+            attitude.values.pitch = RADIANS_TO_DECIDEGREES(eulers.y);
+            attitude.values.yaw = RADIANS_TO_DECIDEGREES(eulers.z);
 
-            if (yaw_sensor < 0) {
-                yaw_sensor += 3600;
+            if (attitude.values.yaw < 0) {
+                attitude.values.yaw += 3600;
             }
 
             if (millis() - start_time_ms > 30000) {
-                FLAG_ARMED = true;
+                // FLAG_ARMED = true;
             }
-
-            attitude.values.roll = roll_sensor;
-            attitude.values.pitch = pitch_sensor;
-            attitude.values.yaw = yaw_sensor;
 
             fpVector3_t _relpos_cm;    // NEU
             fpVector3_t _velocity_cm;  // NEU

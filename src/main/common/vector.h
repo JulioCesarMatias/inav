@@ -22,6 +22,15 @@
 
 #include "common/maths.h"
 
+typedef union
+{
+    float v[2];
+    struct
+    {
+        float x, y;
+    };
+} fpVector2_t;
+
 typedef union {
     float v[3];
     struct {
@@ -31,15 +40,15 @@ typedef union {
 
 typedef struct {
     float m[3][3];
-} fpMat3_t;
+} fpMatrix3_t;
 
 typedef struct {
     fpVector3_t axis;
     float angle;
 } fpAxisAngle_t;
 
-void rotationMatrixFromAngles(fpMat3_t * rmat, const fp_angles_t * angles);
-void rotationMatrixFromAxisAngle(fpMat3_t * rmat, const fpAxisAngle_t * a);
+void rotationMatrixFromAngles(fpMatrix3_t * rmat, const fp_angles_t * angles);
+void rotationMatrixFromAxisAngle(fpMatrix3_t * rmat, const fpAxisAngle_t * a);
 
 static inline void vectorZero(fpVector3_t * v)
 {
@@ -48,7 +57,7 @@ static inline void vectorZero(fpVector3_t * v)
     v->z = 0.0f;
 }
 
-static inline fpVector3_t * rotationMatrixRotateVector(fpVector3_t * result, const fpVector3_t * a, const fpMat3_t * rmat)
+static inline fpVector3_t * rotationMatrixRotateVector(fpVector3_t * result, const fpVector3_t * a, const fpMatrix3_t * rmat)
 {
     fpVector3_t r;
 
@@ -114,5 +123,47 @@ static inline fpVector3_t * vectorScale(fpVector3_t * result, const fpVector3_t 
     ab.z = a->z * b;
 
     *result = ab;
+    return result;
+}
+
+
+// matrix multiplication by a vector
+static inline fpVector3_t multiplyMatrixByVector(fpMatrix3_t m, fpVector3_t v)
+{
+    fpVector3_t vRet;
+
+    vRet.x = m.m[0][0] * v.x + m.m[0][1] * v.y + m.m[0][2] * v.z;
+    vRet.y = m.m[1][0] * v.x + m.m[1][1] * v.y + m.m[1][2] * v.z;
+    vRet.z = m.m[2][0] * v.x + m.m[2][1] * v.y + m.m[2][2] * v.z;
+
+    return vRet;
+}
+
+static inline void matrixFromEuler(fpMatrix3_t *m, float roll, float pitch, float yaw)
+{
+    const float cp = cos(pitch);
+    const float sp = sin(pitch);
+    const float sr = sin(roll);
+    const float cr = cos(roll);
+    const float sy = sin(yaw);
+    const float cy = cos(yaw);
+
+    m->m[0][0] = cp * cy;
+    m->m[0][1] = (sr * sp * cy) - (cr * sy);
+    m->m[0][2] = (cr * sp * cy) + (sr * sy);
+    m->m[1][0] = cp * sy;
+    m->m[1][1] = (sr * sp * sy) + (cr * cy);
+    m->m[1][2] = (cr * sp * sy) - (sr * cy);
+    m->m[2][0] = -sp;
+    m->m[2][1] = sr * cp;
+    m->m[2][2] = cr * cp;
+}
+
+static inline fpMatrix3_t matrixTransposed(const fpMatrix3_t m)
+{
+    fpMatrix3_t result = {{{m.m[0][0], m.m[1][0], m.m[2][0]},
+                           {m.m[0][1], m.m[1][1], m.m[2][1]},
+                           {m.m[0][2], m.m[1][2], m.m[2][2]}}};
+
     return result;
 }

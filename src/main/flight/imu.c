@@ -94,7 +94,7 @@ STATIC_FASTRAM fpVector3_t vCorrectedMagNorth;             // Magnetic North vec
 
 FASTRAM fpQuaternion_t orientation;
 FASTRAM attitudeEulerAngles_t attitude;             // absolute angle inclination in multiple of 0.1 degree    180 deg = 1800
-FASTRAM float rMat[3][3];
+FASTRAM fpMatrix3_t ahrsMatrix;
 
 STATIC_FASTRAM imuRuntimeConfig_t imuRuntimeConfig;
 
@@ -145,17 +145,17 @@ STATIC_UNIT_TESTED void imuComputeRotationMatrix(void)
     float q1q3 = orientation.q1 * orientation.q3;
     float q2q3 = orientation.q2 * orientation.q3;
 
-    rMat[0][0] = 1.0f - 2.0f * q2q2 - 2.0f * q3q3;
-    rMat[0][1] = 2.0f * (q1q2 + -q0q3);
-    rMat[0][2] = 2.0f * (q1q3 - -q0q2);
+    ahrsMatrix.m[0][0] = 1.0f - 2.0f * q2q2 - 2.0f * q3q3;
+    ahrsMatrix.m[0][1] = 2.0f * (q1q2 + -q0q3);
+    ahrsMatrix.m[0][2] = 2.0f * (q1q3 - -q0q2);
 
-    rMat[1][0] = 2.0f * (q1q2 - -q0q3);
-    rMat[1][1] = 1.0f - 2.0f * q1q1 - 2.0f * q3q3;
-    rMat[1][2] = 2.0f * (q2q3 + -q0q1);
+    ahrsMatrix.m[1][0] = 2.0f * (q1q2 - -q0q3);
+    ahrsMatrix.m[1][1] = 1.0f - 2.0f * q1q1 - 2.0f * q3q3;
+    ahrsMatrix.m[1][2] = 2.0f * (q2q3 + -q0q1);
 
-    rMat[2][0] = 2.0f * (q1q3 + -q0q2);
-    rMat[2][1] = 2.0f * (q2q3 - -q0q1);
-    rMat[2][2] = 1.0f - 2.0f * q1q1 - 2.0f * q2q2;
+    ahrsMatrix.m[2][0] = 2.0f * (q1q3 + -q0q2);
+    ahrsMatrix.m[2][1] = 2.0f * (q2q3 - -q0q1);
+    ahrsMatrix.m[2][2] = 1.0f - 2.0f * q1q1 - 2.0f * q2q2;
 }
 
 void imuConfigure(void)
@@ -563,9 +563,9 @@ STATIC_UNIT_TESTED void imuUpdateEulerAngles(void)
 #endif
 	{
 		/* Compute pitch/roll angles */
-		attitude.values.roll = RADIANS_TO_DECIDEGREES(atan2_approx(rMat[2][1], rMat[2][2]));
-		attitude.values.pitch = RADIANS_TO_DECIDEGREES((0.5f * M_PIf) - acos_approx(-rMat[2][0]));
-		attitude.values.yaw = RADIANS_TO_DECIDEGREES(-atan2_approx(rMat[1][0], rMat[0][0]));
+		attitude.values.roll = RADIANS_TO_DECIDEGREES(atan2_approx(ahrsMatrix.m[2][1], ahrsMatrix.m[2][2]));
+		attitude.values.pitch = RADIANS_TO_DECIDEGREES((0.5f * M_PIf) - acos_approx(-ahrsMatrix.m[2][0]));
+		attitude.values.yaw = RADIANS_TO_DECIDEGREES(-atan2_approx(ahrsMatrix.m[1][0], ahrsMatrix.m[0][0]));
 	}
 
     if (attitude.values.yaw < 0)
@@ -637,9 +637,9 @@ static void imuCalculateFilters(float dT)
     imuMeasuredRotationBFFiltered.x = pt1FilterApply4(&rotRateFilterX, imuMeasuredRotationBF.x, IMU_ROTATION_LPF, dT);
     imuMeasuredRotationBFFiltered.y = pt1FilterApply4(&rotRateFilterY, imuMeasuredRotationBF.y, IMU_ROTATION_LPF, dT);
     imuMeasuredRotationBFFiltered.z = pt1FilterApply4(&rotRateFilterZ, imuMeasuredRotationBF.z, IMU_ROTATION_LPF, dT);
-    HeadVecEFFiltered.x = pt1FilterApply4(&HeadVecEFFilterX, rMat[0][0], IMU_ROTATION_LPF, dT);
-    HeadVecEFFiltered.y = pt1FilterApply4(&HeadVecEFFilterY, rMat[1][0], IMU_ROTATION_LPF, dT);
-    HeadVecEFFiltered.z = pt1FilterApply4(&HeadVecEFFilterZ, rMat[2][0], IMU_ROTATION_LPF, dT);
+    HeadVecEFFiltered.x = pt1FilterApply4(&HeadVecEFFilterX, ahrsMatrix.m[0][0], IMU_ROTATION_LPF, dT);
+    HeadVecEFFiltered.y = pt1FilterApply4(&HeadVecEFFilterY, ahrsMatrix.m[1][0], IMU_ROTATION_LPF, dT);
+    HeadVecEFFiltered.z = pt1FilterApply4(&HeadVecEFFilterZ, ahrsMatrix.m[2][0], IMU_ROTATION_LPF, dT);
 
     //anti aliasing
     float GPS3Dspeed = calc_length_pythagorean_3D(gpsSol.velNED[X],gpsSol.velNED[Y],gpsSol.velNED[Z]);

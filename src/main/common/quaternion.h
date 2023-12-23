@@ -197,3 +197,52 @@ static inline fpVector3_t * quaternionRotateVectorInv(fpVector3_t * result, cons
     result->z = vectQuat.q3;
     return result;
 }
+
+// populate the supplied rotation matrix equivalent from this quaternion
+static inline void quaternionToRotationMatrix(fpQuaternion_t q, fpMatrix3_t *m)
+{
+    const float q2q2 = q.q2 * q.q2;
+    const float q2q3 = q.q2 * q.q3;
+    const float q1q1 = q.q1 * q.q1;
+    const float q1q2 = q.q1 * q.q2;
+    const float q1q3 = q.q1 * q.q3;
+    const float q0q1 = q.q0 * q.q1;
+    const float q0q2 = q.q0 * q.q2;
+    const float q0q3 = q.q0 * q.q3;
+    const float q3q3 = q.q3 * q.q3;
+
+    m->m[0][0] = 1.0f - 2.0f * (q2q2 + q3q3);
+    m->m[0][1] = 2.0f * (q1q2 - q0q3);
+    m->m[0][2] = 2.0f * (q1q3 + q0q2);
+    m->m[1][0] = 2.0f * (q1q2 + q0q3);
+    m->m[1][1] = 1.0f - 2.0f * (q1q1 + q3q3);
+    m->m[1][2] = 2.0f * (q2q3 - q0q1);
+    m->m[2][0] = 2.0f * (q1q3 - q0q2);
+    m->m[2][1] = 2.0f * (q2q3 + q0q1);
+    m->m[2][2] = 1.0f - 2.0f * (q1q1 + q2q2);
+}
+
+// create a quaternion from Euler angles
+static inline void quaternionFromEuler(fpQuaternion_t *q, float roll, float pitch, float yaw)
+{
+    const float cr2 = cos(roll * 0.5f);
+    const float cp2 = cos(pitch * 0.5f);
+    const float cy2 = cos(yaw * 0.5f);
+    const float sr2 = sin(roll * 0.5f);
+    const float sp2 = sin(pitch * 0.5f);
+    const float sy2 = sin(yaw * 0.5f);
+
+    q->q0 = cr2 * cp2 * cy2 + sr2 * sp2 * sy2;
+    q->q1 = sr2 * cp2 * cy2 - cr2 * sp2 * sy2;
+    q->q2 = cr2 * sp2 * cy2 + sr2 * cp2 * sy2;
+    q->q3 = cr2 * cp2 * sy2 - sr2 * sp2 * cy2;
+}
+
+static inline void quaternionToEuler(fpQuaternion_t q, float *roll, float *pitch, float *yaw)
+{
+    *roll = atan2f(2.0f * (q.q0 * q.q1 + q.q2 * q.q3),
+                   1.0f - 2.0f * (q.q1 * q.q1 + q.q2 * q.q2));
+    *pitch = asin(2.0f * (q.q0 * q.q2 - q.q3 * q.q1));
+    *yaw = -atan2f(2.0f * (q.q0 * q.q3 + q.q1 * q.q2),
+                   1.0f - 2.0f * (q.q2 * q.q2 + q.q3 * q.q3));
+}

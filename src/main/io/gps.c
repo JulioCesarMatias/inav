@@ -310,8 +310,8 @@ void updateEstimatedGPSFix(void)
     }
 #endif
 
-    float velX = rMat[0][0] * speed;
-    float velY = -rMat[1][0] * speed;
+    float velX = ahrsMatrix.m[0][0] * speed;
+    float velY = -ahrsMatrix.m[1][0] * speed;
     // here (velX, velY) is estimated horizontal speed without wind influence = airspeed, cm/sec in NEU frame
 
     if (isEstimatedWindSpeedValid()) {
