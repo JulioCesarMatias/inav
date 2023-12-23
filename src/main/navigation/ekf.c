@@ -37,6 +37,7 @@
 #include "scheduler/scheduler.h"
 #include "sensors/acceleration.h"
 #include "sensors/barometer.h"
+#include "sensors/compass.h"
 #include "sensors/gyro.h"
 #include "sensors/pitotmeter.h"
 
@@ -58,6 +59,28 @@ typedef struct
     float posD2;                 // 30
 } state_elements_t;
 
+// states held by magnetomter fusion across time steps
+// magnetometer X,Y,Z measurements are fused across three time steps
+// to level computational load as this is an expensive operation
+typedef struct
+{
+    float q0;
+    float q1;
+    float q2;
+    float q3;
+    float magN;
+    float magE;
+    float magD;
+    float magXbias;
+    float magYbias;
+    float magZbias;
+    uint8_t obsIndex;
+    fpMatrix3_t DCM;
+    fpVector3_t MagPred;
+    float R_MAG;
+    float SH_MAG[9];
+} mag_state_t;
+
 typedef struct
 {
     bool diverged : 1;
@@ -68,8 +91,6 @@ typedef struct
     bool bad_airspeed : 1;
     bool bad_sideslip : 1;
 } fault_status_t;
-
-#define IGNORE_COMPASS_EKF
 
 // earth rotation rate (rad/sec)
 #define EARTH_RATE 0.000072921f
@@ -92,6 +113,9 @@ state_elements_t
     statesAtPosTime;  // States at the effective time of posNE measurements
 state_elements_t
     statesAtHgtTime;  // States at the effective time of hgtMea measurement
+state_elements_t statesAtMagMeasTime;  // filter states at the effective time of
+                                       // compass measurements
+mag_state_t mag_state;
 
 gpsOrigin_t ekfOrigin;
 
@@ -132,6 +156,14 @@ fpVector3_t velNED;         // North, East, Down velocity measurements (m/s)
 fpVector3_t velDotNED;      // rate of change of velocity in NED frame
 fpVector3_t velDotNEDfilt;  // low pass filtered velDotNED
 fpVector3_t earthRateNED;   // earths angular rate vector in NED (rad/s)
+fpVector3_t
+    innovMag;  // innovation output from fusion of X,Y,Z compass measurements
+fpVector3_t varInnovMag;   // innovation variance output from fusion of X,Y,Z
+                           // compass measurements
+fpVector3_t magData;       // magnetometer flux readings in X,Y,Z body axes
+fpVector3_t magBias;       // magnetometer bias vector in XYZ body axes
+fpVector3_t magTestRatio;  // sum of squares of magnetometer innovations divided
+                           // by fail threshold
 
 fpMatrix3_t prevTnb;  // previous nav to body transformation used for INS earth
                       // rotation compensation
@@ -141,6 +173,7 @@ float P[22][22];      // covariance matrix
 float nextP[22][22];  // Predicted covariance matrix before addition of process
                       // noise to diagonals
 float KHP[22][22];    // intermediate result used for covariance updates
+float KH[22][22];     // intermediate result used for covariance updates
 float SF[15];  // intermediate variables used to calculate predicted covariance
                // matrix
 float SG[8];   // intermediate variables used to calculate predicted covariance
@@ -162,12 +195,20 @@ bool filterDiverged;    // boolean true if the filter has diverged
 bool staticMode = true;  // boolean to force position and velocity measurements
                          // to zero for pre-arm or bench testing
 bool prevStaticMode = true;  // value of static mode from last update
-bool yawAligned;             // true when the yaw angle has been aligned
-bool newDataHgt;             // true when new height data has arrived
-bool newDataGps;             // true when new GPS data has arrived
+bool fuseMagData;       // boolean true when magnetometer data is to be fused
+bool magFusePerformed;  // boolean set to true when magnetometer fusion has been
+                        // perfomred in that time step
+bool magFuseRequired;   // boolean set to true when magnetometer fusion will be
+                        // perfomred in the next time step
+bool yawAligned;        // true when the yaw angle has been aligned
+bool newDataMag;        // true when new magnetometer data has arrived
+bool newDataHgt;        // true when new height data has arrived
+bool newDataGps;        // true when new GPS data has arrived
 bool fuseVelData;  // this boolean causes the velNED measurements to be fused
 bool fusePosData;  // this boolean causes the posNE measurements to be fused
 bool fuseHgtData;  // this boolean causes the hgtMea measurements to be fused
+bool magHealth;    // boolean true if magnetometer has passed innovation
+                   // consistency check
 bool velHealth;  // boolean true if velocity measurements have passed innovation
                  // consistency check
 bool posHealth;  // boolean true if position measurements have passed innovation
@@ -186,6 +227,7 @@ bool magTimeout;  // boolean true if magnetometer measurements have failed for
 bool onGround;    // boolean true when the flight vehicle is on the ground (not
                   // flying)
 bool prevOnGround;  // value of onGround from previous update
+bool earthRateNEDReset;
 bool inhibitWindStates =
     true;  // true when wind states and covariances are to remain constant
 bool inhibitMagStates = true;  // true when magnetic field states and
@@ -219,6 +261,8 @@ float dtVelPos =
     0.02f;  // average of msec between position and velocity corrections
 float IMU1_weighting =
     0.5f;  // Weighting applied to use of IMU1. Varies between 0 and 1.
+float _magVarRateScale =
+    0.05f;  // scale factor applied to magnetometer variance due to angular rate
 float _gpsNEVelVarAccScale =
     0.05f;  // Scale factor applied to NE velocity measurement variance due to
             // manoeuvre acceleration
@@ -257,6 +301,7 @@ float gpsNoiseScaler = 1.0f;  // Used to scale the  GPS measurement noise and
 float scaledDeltaGyrBiasLgth;  // scaled delta gyro bias vector length used to
                                // test for filter divergence
 
+int16_t _msecMagDelay = 40;  // Magnetometer measurement delay (msec)
 int16_t _msecHgtDelay =
     60;  // effective average delay of height measurements rel to (msec)
 int16_t _hgtRetryTimeMode0 =
@@ -291,6 +336,9 @@ uint32_t secondLastFixTime_ms;  // time of second last GPS fix used to determine
 uint32_t lastDecayTime_ms;      // time of last decay of GPS position offset
 uint32_t lastDivergeTime_ms;  // time in msec divergence of filter last detected
 uint32_t start_time_ms;
+uint32_t _magFailTimeLimit_ms =
+    10000;  // number of msec before a magnetometer failing innovation
+            // consistency checks is declared failed (msec)
 
 bool _ekf_use = true;  // convert to param
 
@@ -320,6 +368,12 @@ float _gyroBiasProcessNoise = GBIAS_PNOISE_DEFAULT;
 // faster and noisier. (Param in m/s^2)
 // @Range: 0.00001 0.001
 float _accelBiasProcessNoise = ABIAS_PNOISE_DEFAULT;
+
+// @Description: This is the RMS value of noise in magnetometer measurements.
+// Increasing it reduces the weighting on these measurements. (Param in gauss)
+// @Range: 0.01 0.5
+// @Increment: 0.01
+float _magNoise = MAG_NOISE_DEFAULT;
 
 // @Description: This noise controls the growth of earth magnetic field state
 // error estimates. Increasing it makes earth magnetic field bias estimation
@@ -379,6 +433,14 @@ float _baroAltNoise = ALT_NOISE_DEFAULT;
 // @Range: 1 100
 // @Increment: 1
 float _gpsPosInnovGate = POS_GATE_DEFAULT;
+
+// @Description: This parameter sets the number of standard deviations applied
+// to the magnetometer measurement innovation consistency check. Decreasing it
+// makes it more likely that good measurements will be rejected. Increasing it
+// makes it more likely that bad measurements will be accepted.
+// @Range: 1 100
+// @Increment: 1
+float _magInnovGate = MAG_GATE_DEFAULT;
 
 // @Description: This parameter controls the maximum amount of difference in
 // horizontal acceleration between the value predicted by the filter and the
@@ -445,8 +507,8 @@ bool ekf_useAirspeed(void)
 // return true if we should use the magnetometer sensor
 bool ekf_use_compass(void)
 {
-    // magnetometer enabled?
-    return false;
+    return sensors(SENSOR_MAG) && compassIsHealthy() &&
+           compassIsCalibrationComplete();
 }
 
 // zero specified range of rows in the state covariance matrix
@@ -532,7 +594,7 @@ void ekf_readIMUData(void)
     lastAngRate.x = angRate.x;
     lastAngRate.y = angRate.y;
     lastAngRate.z = angRate.z;
-    
+
     // accel IMU1
     dVelIMU1.x = (accel1.x + lastAccel1.x) * dtIMU * 0.5f;
     dVelIMU1.y = (accel1.y + lastAccel1.y) * dtIMU * 0.5f;
@@ -548,6 +610,35 @@ void ekf_readIMUData(void)
     lastAccel2.x = accel2.x;
     lastAccel2.y = accel2.y;
     lastAccel2.z = accel2.z;
+}
+
+// check for new magnetometer data and update store measurements if available
+void ekf_readMagData(void)
+{
+    if (ekf_use_compass() && compassLastUpdate() != lastMagUpdate) {
+        // store time of last measurement update
+        lastMagUpdate = compassLastUpdate();
+
+        // read compass data and assign to bias and uncorrected measurement
+        // body fixed magnetic bias is opposite sign to APM compass offsets
+        // we scale compass data to improve numerical conditioning
+        magBias.x = -compassConfig()->magZero.raw[X] * 0.001f;
+        magBias.y = -compassConfig()->magZero.raw[Y] * 0.001f;
+        magBias.z = -compassConfig()->magZero.raw[Z] * 0.001f;
+        magData.x = mag.magADC[X] * 0.001f + magBias.x;
+        magData.y = mag.magADC[Y] * 0.001f + magBias.y;
+        magData.z = mag.magADC[Z] * 0.001f + magBias.z;
+
+        // get states stored at time closest to measurement time after allowance
+        // for measurement delay
+        ekf_RecallStates(&statesAtMagMeasTime,
+                         (imuSampleTime_ms - _msecMagDelay));
+
+        // let other processes know that new compass data has arrived
+        newDataMag = true;
+    } else {
+        newDataMag = false;
+    }
 }
 
 // check for new altitude measurement data and update stored measurement if
@@ -630,13 +721,23 @@ void ekf_readGpsData(void)
         velNED.y = CENTIMETERS_TO_METERS(gpsSol.velNED[Y]);
         velNED.z = CENTIMETERS_TO_METERS(gpsSol.velNED[Z]);
 
+        if (staticMode) {
+            ekfOrigin.valid = false;
+            earthRateNEDReset = true;
+        }
+
         // read latitutde and longitude from GPS and convert to NE position
         if (!ekfOrigin.valid) {
             geoSetOrigin(&ekfOrigin, &gpsSol.llh, GEO_ORIGIN_SET);
         } else {
-            geoConvertGeodeticToLocal(&gpsPosNE, &ekfOrigin, &gpsSol.llh, GEO_ALT_ABSOLUTE);
-            // define Earth rotation vector in the NED navigation frame
-            ekf_calcEarthRateNED(&earthRateNED, posControl.rthState.homePosition.pos.x);
+            geoConvertGeodeticToLocal(&gpsPosNE, &ekfOrigin, &gpsSol.llh,
+                                      GEO_ALT_ABSOLUTE);
+
+            if (earthRateNEDReset) {
+                // define Earth rotation vector in the NED navigation frame
+                ekf_calcEarthRateNED(&earthRateNED, ekfOrigin.lat * 1.0e-7f);
+                earthRateNEDReset = false;
+            }
         }
 
         // decay and limit the position offset which is applied to NE position
@@ -879,7 +980,6 @@ void ekf_CovarianceInit(void)
 // assume zero yaw angle
 fpQuaternion_t ekf_calcQuatAndFieldStates(float roll, float pitch)
 {
-#ifndef IGNORE_COMPASS_EKF
     // declare local variables required to calculate initial orientation and
     // magnetic field
     float yaw;
@@ -924,14 +1024,6 @@ fpQuaternion_t ekf_calcQuatAndFieldStates(float roll, float pitch)
         yawAligned = false;
     }
 
-#else
-
-    fpQuaternion_t initQuat;
-    quaternionFromEuler(&initQuat, roll, pitch, 0.0f);
-    yawAligned = false;
-
-#endif
-
     // return attitude quaternion
     return initQuat;
 }
@@ -973,9 +1065,7 @@ void ekf_InitialiseFilterDynamic(void)
     ekf_ResetVelocity();
     ekf_ResetPosition();
     ekf_ResetHeight();
-#ifndef IGNORE_COMPASS_EKF
     state->body_magfield = magBias;
-#endif
 
     // set to true now that states have be initialised
     statesInitialised = true;
@@ -1079,6 +1169,921 @@ void ekf_CopyAndFixCovariances(void)
         for (uint8_t j = 0; j <= i - 1; j++) {
             P[i][j] = 0.5f * (nextP[i][j] + nextP[j][i]);
             P[j][i] = P[i][j];
+        }
+    }
+}
+
+// fuse magnetometer measurements and apply innovation consistency checks
+// fuse each axis on consecutive time steps to spread computional load
+void ekf_FuseMagnetometer(void)
+{
+    // declarations
+    float *q0 = &mag_state.q0;
+    float *q1 = &mag_state.q1;
+    float *q2 = &mag_state.q2;
+    float *q3 = &mag_state.q3;
+    float *magN = &mag_state.magN;
+    float *magE = &mag_state.magE;
+    float *magD = &mag_state.magD;
+    float *magXbias = &mag_state.magXbias;
+    float *magYbias = &mag_state.magYbias;
+    float *magZbias = &mag_state.magZbias;
+    uint8_t *obsIndex = &mag_state.obsIndex;
+    fpMatrix3_t *DCM = &mag_state.DCM;
+    fpVector3_t *MagPred = &mag_state.MagPred;
+    float *R_MAG = &mag_state.R_MAG;
+    float *SH_MAG = &mag_state.SH_MAG[0];
+    float H_MAG[22];
+    float SK_MX[6];
+    float SK_MY[6];
+    float SK_MZ[6];
+
+    // perform sequential fusion of magnetometer measurements.
+    // this assumes that the errors in the different components are
+    // uncorrelated which is not true, however in the absence of covariance
+    // data fit is the only assumption we can make
+    // so we might as well take advantage of the computational efficiencies
+    // associated with sequential fusion
+    if (fuseMagData || *obsIndex == 1 || *obsIndex == 2) {
+        // calculate observation jacobians and Kalman gains
+        if (fuseMagData) {
+            // copy required states to local variable names
+            *q0 = statesAtMagMeasTime.quat.q0;
+            *q1 = statesAtMagMeasTime.quat.q1;
+            *q2 = statesAtMagMeasTime.quat.q2;
+            *q3 = statesAtMagMeasTime.quat.q3;
+            *magN = statesAtMagMeasTime.earth_magfield.x;
+            *magE = statesAtMagMeasTime.earth_magfield.y;
+            *magD = statesAtMagMeasTime.earth_magfield.z;
+            *magXbias = statesAtMagMeasTime.body_magfield.x;
+            *magYbias = statesAtMagMeasTime.body_magfield.y;
+            *magZbias = statesAtMagMeasTime.body_magfield.z;
+
+            // rotate predicted earth components into body axes and calculate
+            // predicted measurements
+            DCM->m[0][0] = *q0 * *q0 + *q1 * *q1 - *q2 * *q2 - *q3 * *q3;
+            DCM->m[0][1] = 2 * (*q1 * *q2 + *q0 * *q3);
+            DCM->m[0][2] = 2 * (*q1 * *q3 - *q0 * *q2);
+            DCM->m[1][0] = 2 * (*q1 * *q2 - *q0 * *q3);
+            DCM->m[1][1] = *q0 * *q0 - *q1 * *q1 + *q2 * *q2 - *q3 * *q3;
+            DCM->m[1][2] = 2 * (*q2 * *q3 + *q0 * *q1);
+            DCM->m[2][0] = 2 * (*q1 * *q3 + *q0 * *q2);
+            DCM->m[2][1] = 2 * (*q2 * *q3 - *q0 * *q1);
+            DCM->m[2][2] = *q0 * *q0 - *q1 * *q1 - *q2 * *q2 + *q3 * *q3;
+            MagPred->v[0] = DCM->m[0][0] * *magN + DCM->m[0][1] * *magE +
+                            DCM->m[0][2] * *magD + *magXbias;
+            MagPred->v[1] = DCM->m[1][0] * *magN + DCM->m[1][1] * *magE +
+                            DCM->m[1][2] * *magD + *magYbias;
+            MagPred->v[2] = DCM->m[2][0] * *magN + DCM->m[2][1] * *magE +
+                            DCM->m[2][2] * *magD + *magZbias;
+
+            // scale magnetometer observation error with total angular rate
+            *R_MAG =
+                sq(constrainf(_magNoise, 0.01f, 0.5f)) +
+                sq(_magVarRateScale *
+                   calc_length_pythagorean_3D(dAngIMU.x, dAngIMU.y, dAngIMU.z) /
+                   dtIMU);
+
+            // calculate observation jacobians
+            SH_MAG[0] = 2 * *magD * *q3 + 2 * *magE * *q2 + 2 * *magN * *q1;
+            SH_MAG[1] = 2 * *magD * *q0 - 2 * *magE * *q1 + 2 * *magN * *q2;
+            SH_MAG[2] = 2 * *magD * *q1 + 2 * *magE * *q0 - 2 * *magN * *q3;
+            SH_MAG[3] = sq(*q3);
+            SH_MAG[4] = sq(*q2);
+            SH_MAG[5] = sq(*q1);
+            SH_MAG[6] = sq(*q0);
+            SH_MAG[7] = 2 * *magN * *q0;
+            SH_MAG[8] = 2 * *magE * *q3;
+            for (uint8_t i = 0; i <= 21; i++) H_MAG[i] = 0;
+            H_MAG[0] = SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2;
+            H_MAG[1] = SH_MAG[0];
+            H_MAG[2] = 2 * *magE * *q1 - 2 * *magD * *q0 - 2 * *magN * *q2;
+            H_MAG[3] = SH_MAG[2];
+            H_MAG[16] = SH_MAG[5] - SH_MAG[4] - SH_MAG[3] + SH_MAG[6];
+            H_MAG[17] = 2 * *q0 * *q3 + 2 * *q1 * *q2;
+            H_MAG[18] = 2 * *q1 * *q3 - 2 * *q0 * *q2;
+            H_MAG[19] = 1;
+
+            // calculate Kalman gain
+            float temp =
+                (P[19][19] + (*R_MAG) + P[1][19] * SH_MAG[0] +
+                 P[3][19] * SH_MAG[2] -
+                 P[16][19] * (SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) -
+                 (2 * *magD * *q0 - 2 * *magE * *q1 + 2 * *magN * *q2) *
+                     (P[19][2] + P[1][2] * SH_MAG[0] + P[3][2] * SH_MAG[2] -
+                      P[16][2] *
+                          (SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) +
+                      P[17][2] * (2 * *q0 * *q3 + 2 * *q1 * *q2) -
+                      P[18][2] * (2 * *q0 * *q2 - 2 * *q1 * *q3) -
+                      P[2][2] * (2 * *magD * *q0 - 2 * *magE * *q1 +
+                                 2 * *magN * *q2) +
+                      P[0][2] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2) *
+                     (P[19][0] + P[1][0] * SH_MAG[0] + P[3][0] * SH_MAG[2] -
+                      P[16][0] *
+                          (SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) +
+                      P[17][0] * (2 * *q0 * *q3 + 2 * *q1 * *q2) -
+                      P[18][0] * (2 * *q0 * *q2 - 2 * *q1 * *q3) -
+                      P[2][0] * (2 * *magD * *q0 - 2 * *magE * *q1 +
+                                 2 * *magN * *q2) +
+                      P[0][0] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 SH_MAG[0] *
+                     (P[19][1] + P[1][1] * SH_MAG[0] + P[3][1] * SH_MAG[2] -
+                      P[16][1] *
+                          (SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) +
+                      P[17][1] * (2 * *q0 * *q3 + 2 * *q1 * *q2) -
+                      P[18][1] * (2 * *q0 * *q2 - 2 * *q1 * *q3) -
+                      P[2][1] * (2 * *magD * *q0 - 2 * *magE * *q1 +
+                                 2 * *magN * *q2) +
+                      P[0][1] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 SH_MAG[2] *
+                     (P[19][3] + P[1][3] * SH_MAG[0] + P[3][3] * SH_MAG[2] -
+                      P[16][3] *
+                          (SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) +
+                      P[17][3] * (2 * *q0 * *q3 + 2 * *q1 * *q2) -
+                      P[18][3] * (2 * *q0 * *q2 - 2 * *q1 * *q3) -
+                      P[2][3] * (2 * *magD * *q0 - 2 * *magE * *q1 +
+                                 2 * *magN * *q2) +
+                      P[0][3] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) -
+                 (SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) *
+                     (P[19][16] + P[1][16] * SH_MAG[0] + P[3][16] * SH_MAG[2] -
+                      P[16][16] *
+                          (SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) +
+                      P[17][16] * (2 * *q0 * *q3 + 2 * *q1 * *q2) -
+                      P[18][16] * (2 * *q0 * *q2 - 2 * *q1 * *q3) -
+                      P[2][16] * (2 * *magD * *q0 - 2 * *magE * *q1 +
+                                  2 * *magN * *q2) +
+                      P[0][16] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 P[17][19] * (2 * *q0 * *q3 + 2 * *q1 * *q2) -
+                 P[18][19] * (2 * *q0 * *q2 - 2 * *q1 * *q3) -
+                 P[2][19] *
+                     (2 * *magD * *q0 - 2 * *magE * *q1 + 2 * *magN * *q2) +
+                 (2 * *q0 * *q3 + 2 * *q1 * *q2) *
+                     (P[19][17] + P[1][17] * SH_MAG[0] + P[3][17] * SH_MAG[2] -
+                      P[16][17] *
+                          (SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) +
+                      P[17][17] * (2 * *q0 * *q3 + 2 * *q1 * *q2) -
+                      P[18][17] * (2 * *q0 * *q2 - 2 * *q1 * *q3) -
+                      P[2][17] * (2 * *magD * *q0 - 2 * *magE * *q1 +
+                                  2 * *magN * *q2) +
+                      P[0][17] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) -
+                 (2 * *q0 * *q2 - 2 * *q1 * *q3) *
+                     (P[19][18] + P[1][18] * SH_MAG[0] + P[3][18] * SH_MAG[2] -
+                      P[16][18] *
+                          (SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) +
+                      P[17][18] * (2 * *q0 * *q3 + 2 * *q1 * *q2) -
+                      P[18][18] * (2 * *q0 * *q2 - 2 * *q1 * *q3) -
+                      P[2][18] * (2 * *magD * *q0 - 2 * *magE * *q1 +
+                                  2 * *magN * *q2) +
+                      P[0][18] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 P[0][19] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2));
+            if (temp >= (*R_MAG)) {
+                SK_MX[0] = 1.0f / temp;
+                faultStatus.bad_xmag = false;
+            } else {
+                // the calculation is badly conditioned, so we cannot perform
+                // fusion on this step we increase the state variances and try
+                // again next time
+                P[19][19] += 0.1f * (*R_MAG);
+                *obsIndex = 1;
+                faultStatus.bad_xmag = true;
+                return;
+            }
+            SK_MX[1] = SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6];
+            SK_MX[2] = 2 * *magD * *q0 - 2 * *magE * *q1 + 2 * *magN * *q2;
+            SK_MX[3] = SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2;
+            SK_MX[4] = 2 * *q0 * *q2 - 2 * *q1 * *q3;
+            SK_MX[5] = 2 * *q0 * *q3 + 2 * *q1 * *q2;
+            Kfusion[0] = SK_MX[0] * (P[0][19] + P[0][1] * SH_MAG[0] +
+                                     P[0][3] * SH_MAG[2] + P[0][0] * SK_MX[3] -
+                                     P[0][2] * SK_MX[2] - P[0][16] * SK_MX[1] +
+                                     P[0][17] * SK_MX[5] - P[0][18] * SK_MX[4]);
+            Kfusion[1] = SK_MX[0] * (P[1][19] + P[1][1] * SH_MAG[0] +
+                                     P[1][3] * SH_MAG[2] + P[1][0] * SK_MX[3] -
+                                     P[1][2] * SK_MX[2] - P[1][16] * SK_MX[1] +
+                                     P[1][17] * SK_MX[5] - P[1][18] * SK_MX[4]);
+            Kfusion[2] = SK_MX[0] * (P[2][19] + P[2][1] * SH_MAG[0] +
+                                     P[2][3] * SH_MAG[2] + P[2][0] * SK_MX[3] -
+                                     P[2][2] * SK_MX[2] - P[2][16] * SK_MX[1] +
+                                     P[2][17] * SK_MX[5] - P[2][18] * SK_MX[4]);
+            Kfusion[3] = SK_MX[0] * (P[3][19] + P[3][1] * SH_MAG[0] +
+                                     P[3][3] * SH_MAG[2] + P[3][0] * SK_MX[3] -
+                                     P[3][2] * SK_MX[2] - P[3][16] * SK_MX[1] +
+                                     P[3][17] * SK_MX[5] - P[3][18] * SK_MX[4]);
+            Kfusion[4] = SK_MX[0] * (P[4][19] + P[4][1] * SH_MAG[0] +
+                                     P[4][3] * SH_MAG[2] + P[4][0] * SK_MX[3] -
+                                     P[4][2] * SK_MX[2] - P[4][16] * SK_MX[1] +
+                                     P[4][17] * SK_MX[5] - P[4][18] * SK_MX[4]);
+            Kfusion[5] = SK_MX[0] * (P[5][19] + P[5][1] * SH_MAG[0] +
+                                     P[5][3] * SH_MAG[2] + P[5][0] * SK_MX[3] -
+                                     P[5][2] * SK_MX[2] - P[5][16] * SK_MX[1] +
+                                     P[5][17] * SK_MX[5] - P[5][18] * SK_MX[4]);
+            Kfusion[6] = SK_MX[0] * (P[6][19] + P[6][1] * SH_MAG[0] +
+                                     P[6][3] * SH_MAG[2] + P[6][0] * SK_MX[3] -
+                                     P[6][2] * SK_MX[2] - P[6][16] * SK_MX[1] +
+                                     P[6][17] * SK_MX[5] - P[6][18] * SK_MX[4]);
+            Kfusion[7] = SK_MX[0] * (P[7][19] + P[7][1] * SH_MAG[0] +
+                                     P[7][3] * SH_MAG[2] + P[7][0] * SK_MX[3] -
+                                     P[7][2] * SK_MX[2] - P[7][16] * SK_MX[1] +
+                                     P[7][17] * SK_MX[5] - P[7][18] * SK_MX[4]);
+            Kfusion[8] = SK_MX[0] * (P[8][19] + P[8][1] * SH_MAG[0] +
+                                     P[8][3] * SH_MAG[2] + P[8][0] * SK_MX[3] -
+                                     P[8][2] * SK_MX[2] - P[8][16] * SK_MX[1] +
+                                     P[8][17] * SK_MX[5] - P[8][18] * SK_MX[4]);
+            Kfusion[9] = SK_MX[0] * (P[9][19] + P[9][1] * SH_MAG[0] +
+                                     P[9][3] * SH_MAG[2] + P[9][0] * SK_MX[3] -
+                                     P[9][2] * SK_MX[2] - P[9][16] * SK_MX[1] +
+                                     P[9][17] * SK_MX[5] - P[9][18] * SK_MX[4]);
+            Kfusion[10] =
+                SK_MX[0] * (P[10][19] + P[10][1] * SH_MAG[0] +
+                            P[10][3] * SH_MAG[2] + P[10][0] * SK_MX[3] -
+                            P[10][2] * SK_MX[2] - P[10][16] * SK_MX[1] +
+                            P[10][17] * SK_MX[5] - P[10][18] * SK_MX[4]);
+            Kfusion[11] =
+                SK_MX[0] * (P[11][19] + P[11][1] * SH_MAG[0] +
+                            P[11][3] * SH_MAG[2] + P[11][0] * SK_MX[3] -
+                            P[11][2] * SK_MX[2] - P[11][16] * SK_MX[1] +
+                            P[11][17] * SK_MX[5] - P[11][18] * SK_MX[4]);
+            Kfusion[12] =
+                SK_MX[0] * (P[12][19] + P[12][1] * SH_MAG[0] +
+                            P[12][3] * SH_MAG[2] + P[12][0] * SK_MX[3] -
+                            P[12][2] * SK_MX[2] - P[12][16] * SK_MX[1] +
+                            P[12][17] * SK_MX[5] - P[12][18] * SK_MX[4]);
+            // this term has been zeroed to improve stability of the Z accel
+            // bias
+            Kfusion[13] = 0.0f;  // SK_MX[0]*(P[13][19] + P[13][1]*SH_MAG[0] +
+                                 // P[13][3]*SH_MAG[2] + P[13][0]*SK_MX[3] -
+                                 // P[13][2]*SK_MX[2] - P[13][16]*SK_MX[1] +
+                                 // P[13][17]*SK_MX[5] - P[13][18]*SK_MX[4]);
+            // zero Kalman gains to inhibit wind state estimation
+            if (!inhibitWindStates) {
+                Kfusion[14] =
+                    SK_MX[0] * (P[14][19] + P[14][1] * SH_MAG[0] +
+                                P[14][3] * SH_MAG[2] + P[14][0] * SK_MX[3] -
+                                P[14][2] * SK_MX[2] - P[14][16] * SK_MX[1] +
+                                P[14][17] * SK_MX[5] - P[14][18] * SK_MX[4]);
+                Kfusion[15] =
+                    SK_MX[0] * (P[15][19] + P[15][1] * SH_MAG[0] +
+                                P[15][3] * SH_MAG[2] + P[15][0] * SK_MX[3] -
+                                P[15][2] * SK_MX[2] - P[15][16] * SK_MX[1] +
+                                P[15][17] * SK_MX[5] - P[15][18] * SK_MX[4]);
+            } else {
+                Kfusion[14] = 0.0;
+                Kfusion[15] = 0.0;
+            }
+            // zero Kalman gains to inhibit magnetic field state estimation
+            if (!inhibitMagStates) {
+                Kfusion[16] =
+                    SK_MX[0] * (P[16][19] + P[16][1] * SH_MAG[0] +
+                                P[16][3] * SH_MAG[2] + P[16][0] * SK_MX[3] -
+                                P[16][2] * SK_MX[2] - P[16][16] * SK_MX[1] +
+                                P[16][17] * SK_MX[5] - P[16][18] * SK_MX[4]);
+                Kfusion[17] =
+                    SK_MX[0] * (P[17][19] + P[17][1] * SH_MAG[0] +
+                                P[17][3] * SH_MAG[2] + P[17][0] * SK_MX[3] -
+                                P[17][2] * SK_MX[2] - P[17][16] * SK_MX[1] +
+                                P[17][17] * SK_MX[5] - P[17][18] * SK_MX[4]);
+                Kfusion[18] =
+                    SK_MX[0] * (P[18][19] + P[18][1] * SH_MAG[0] +
+                                P[18][3] * SH_MAG[2] + P[18][0] * SK_MX[3] -
+                                P[18][2] * SK_MX[2] - P[18][16] * SK_MX[1] +
+                                P[18][17] * SK_MX[5] - P[18][18] * SK_MX[4]);
+                Kfusion[19] =
+                    SK_MX[0] * (P[19][19] + P[19][1] * SH_MAG[0] +
+                                P[19][3] * SH_MAG[2] + P[19][0] * SK_MX[3] -
+                                P[19][2] * SK_MX[2] - P[19][16] * SK_MX[1] +
+                                P[19][17] * SK_MX[5] - P[19][18] * SK_MX[4]);
+                Kfusion[20] =
+                    SK_MX[0] * (P[20][19] + P[20][1] * SH_MAG[0] +
+                                P[20][3] * SH_MAG[2] + P[20][0] * SK_MX[3] -
+                                P[20][2] * SK_MX[2] - P[20][16] * SK_MX[1] +
+                                P[20][17] * SK_MX[5] - P[20][18] * SK_MX[4]);
+                Kfusion[21] =
+                    SK_MX[0] * (P[21][19] + P[21][1] * SH_MAG[0] +
+                                P[21][3] * SH_MAG[2] + P[21][0] * SK_MX[3] -
+                                P[21][2] * SK_MX[2] - P[21][16] * SK_MX[1] +
+                                P[21][17] * SK_MX[5] - P[21][18] * SK_MX[4]);
+            } else {
+                for (uint8_t i = 16; i <= 21; i++) {
+                    Kfusion[i] = 0.0f;
+                }
+            }
+
+            // calculate the observation innovation variance
+            varInnovMag.v[0] = 1.0f / SK_MX[0];
+
+            // reset the observation index to 0 (we start by fusing the X
+            // measurement)
+            *obsIndex = 0;
+
+            // set flags to indicate to other processes that fusion has been
+            // performed and is required on the next frame this can be used by
+            // other fusion processes to avoid fusing on the same frame as this
+            // expensive step
+            magFusePerformed = true;
+            magFuseRequired = true;
+        } else if (*obsIndex == 1)  // we are now fusing the Y measurement
+        {
+            // calculate observation jacobians
+            for (uint8_t i = 0; i <= 21; i++) H_MAG[i] = 0;
+            H_MAG[0] = SH_MAG[2];
+            H_MAG[1] = SH_MAG[1];
+            H_MAG[2] = SH_MAG[0];
+            H_MAG[3] = 2 * *magD * *q2 - SH_MAG[8] - SH_MAG[7];
+            H_MAG[16] = 2 * *q1 * *q2 - 2 * *q0 * *q3;
+            H_MAG[17] = SH_MAG[4] - SH_MAG[3] - SH_MAG[5] + SH_MAG[6];
+            H_MAG[18] = 2 * *q0 * *q1 + 2 * *q2 * *q3;
+            H_MAG[20] = 1;
+
+            // calculate Kalman gain
+            float temp =
+                (P[20][20] + *R_MAG + P[0][20] * SH_MAG[2] +
+                 P[1][20] * SH_MAG[1] + P[2][20] * SH_MAG[0] -
+                 P[17][20] * (SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) -
+                 (2 * *q0 * *q3 - 2 * *q1 * *q2) *
+                     (P[20][16] + P[0][16] * SH_MAG[2] + P[1][16] * SH_MAG[1] +
+                      P[2][16] * SH_MAG[0] -
+                      P[17][16] *
+                          (SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) -
+                      P[16][16] * (2 * *q0 * *q3 - 2 * *q1 * *q2) +
+                      P[18][16] * (2 * *q0 * *q1 + 2 * *q2 * *q3) -
+                      P[3][16] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 (2 * *q0 * *q1 + 2 * *q2 * *q3) *
+                     (P[20][18] + P[0][18] * SH_MAG[2] + P[1][18] * SH_MAG[1] +
+                      P[2][18] * SH_MAG[0] -
+                      P[17][18] *
+                          (SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) -
+                      P[16][18] * (2 * *q0 * *q3 - 2 * *q1 * *q2) +
+                      P[18][18] * (2 * *q0 * *q1 + 2 * *q2 * *q3) -
+                      P[3][18] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) -
+                 (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2) *
+                     (P[20][3] + P[0][3] * SH_MAG[2] + P[1][3] * SH_MAG[1] +
+                      P[2][3] * SH_MAG[0] -
+                      P[17][3] *
+                          (SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) -
+                      P[16][3] * (2 * *q0 * *q3 - 2 * *q1 * *q2) +
+                      P[18][3] * (2 * *q0 * *q1 + 2 * *q2 * *q3) -
+                      P[3][3] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) -
+                 P[16][20] * (2 * *q0 * *q3 - 2 * *q1 * *q2) +
+                 P[18][20] * (2 * *q0 * *q1 + 2 * *q2 * *q3) +
+                 SH_MAG[2] *
+                     (P[20][0] + P[0][0] * SH_MAG[2] + P[1][0] * SH_MAG[1] +
+                      P[2][0] * SH_MAG[0] -
+                      P[17][0] *
+                          (SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) -
+                      P[16][0] * (2 * *q0 * *q3 - 2 * *q1 * *q2) +
+                      P[18][0] * (2 * *q0 * *q1 + 2 * *q2 * *q3) -
+                      P[3][0] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 SH_MAG[1] *
+                     (P[20][1] + P[0][1] * SH_MAG[2] + P[1][1] * SH_MAG[1] +
+                      P[2][1] * SH_MAG[0] -
+                      P[17][1] *
+                          (SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) -
+                      P[16][1] * (2 * *q0 * *q3 - 2 * *q1 * *q2) +
+                      P[18][1] * (2 * *q0 * *q1 + 2 * *q2 * *q3) -
+                      P[3][1] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 SH_MAG[0] *
+                     (P[20][2] + P[0][2] * SH_MAG[2] + P[1][2] * SH_MAG[1] +
+                      P[2][2] * SH_MAG[0] -
+                      P[17][2] *
+                          (SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) -
+                      P[16][2] * (2 * *q0 * *q3 - 2 * *q1 * *q2) +
+                      P[18][2] * (2 * *q0 * *q1 + 2 * *q2 * *q3) -
+                      P[3][2] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) -
+                 (SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) *
+                     (P[20][17] + P[0][17] * SH_MAG[2] + P[1][17] * SH_MAG[1] +
+                      P[2][17] * SH_MAG[0] -
+                      P[17][17] *
+                          (SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) -
+                      P[16][17] * (2 * *q0 * *q3 - 2 * *q1 * *q2) +
+                      P[18][17] * (2 * *q0 * *q1 + 2 * *q2 * *q3) -
+                      P[3][17] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) -
+                 P[3][20] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2));
+            if (temp >= *R_MAG) {
+                SK_MY[0] = 1.0f / temp;
+                faultStatus.bad_ymag = false;
+            } else {
+                // the calculation is badly conditioned, so we cannot perform
+                // fusion on this step we increase the state variances and try
+                // again next time
+                P[20][20] += 0.1f * *R_MAG;
+                *obsIndex = 2;
+                faultStatus.bad_ymag = true;
+                return;
+            }
+            SK_MY[1] = SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6];
+            SK_MY[2] = SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2;
+            SK_MY[3] = 2 * *q0 * *q3 - 2 * *q1 * *q2;
+            SK_MY[4] = 2 * *q0 * *q1 + 2 * *q2 * *q3;
+            Kfusion[0] = SK_MY[0] * (P[0][20] + P[0][0] * SH_MAG[2] +
+                                     P[0][1] * SH_MAG[1] + P[0][2] * SH_MAG[0] -
+                                     P[0][3] * SK_MY[2] - P[0][17] * SK_MY[1] -
+                                     P[0][16] * SK_MY[3] + P[0][18] * SK_MY[4]);
+            Kfusion[1] = SK_MY[0] * (P[1][20] + P[1][0] * SH_MAG[2] +
+                                     P[1][1] * SH_MAG[1] + P[1][2] * SH_MAG[0] -
+                                     P[1][3] * SK_MY[2] - P[1][17] * SK_MY[1] -
+                                     P[1][16] * SK_MY[3] + P[1][18] * SK_MY[4]);
+            Kfusion[2] = SK_MY[0] * (P[2][20] + P[2][0] * SH_MAG[2] +
+                                     P[2][1] * SH_MAG[1] + P[2][2] * SH_MAG[0] -
+                                     P[2][3] * SK_MY[2] - P[2][17] * SK_MY[1] -
+                                     P[2][16] * SK_MY[3] + P[2][18] * SK_MY[4]);
+            Kfusion[3] = SK_MY[0] * (P[3][20] + P[3][0] * SH_MAG[2] +
+                                     P[3][1] * SH_MAG[1] + P[3][2] * SH_MAG[0] -
+                                     P[3][3] * SK_MY[2] - P[3][17] * SK_MY[1] -
+                                     P[3][16] * SK_MY[3] + P[3][18] * SK_MY[4]);
+            Kfusion[4] = SK_MY[0] * (P[4][20] + P[4][0] * SH_MAG[2] +
+                                     P[4][1] * SH_MAG[1] + P[4][2] * SH_MAG[0] -
+                                     P[4][3] * SK_MY[2] - P[4][17] * SK_MY[1] -
+                                     P[4][16] * SK_MY[3] + P[4][18] * SK_MY[4]);
+            Kfusion[5] = SK_MY[0] * (P[5][20] + P[5][0] * SH_MAG[2] +
+                                     P[5][1] * SH_MAG[1] + P[5][2] * SH_MAG[0] -
+                                     P[5][3] * SK_MY[2] - P[5][17] * SK_MY[1] -
+                                     P[5][16] * SK_MY[3] + P[5][18] * SK_MY[4]);
+            Kfusion[6] = SK_MY[0] * (P[6][20] + P[6][0] * SH_MAG[2] +
+                                     P[6][1] * SH_MAG[1] + P[6][2] * SH_MAG[0] -
+                                     P[6][3] * SK_MY[2] - P[6][17] * SK_MY[1] -
+                                     P[6][16] * SK_MY[3] + P[6][18] * SK_MY[4]);
+            Kfusion[7] = SK_MY[0] * (P[7][20] + P[7][0] * SH_MAG[2] +
+                                     P[7][1] * SH_MAG[1] + P[7][2] * SH_MAG[0] -
+                                     P[7][3] * SK_MY[2] - P[7][17] * SK_MY[1] -
+                                     P[7][16] * SK_MY[3] + P[7][18] * SK_MY[4]);
+            Kfusion[8] = SK_MY[0] * (P[8][20] + P[8][0] * SH_MAG[2] +
+                                     P[8][1] * SH_MAG[1] + P[8][2] * SH_MAG[0] -
+                                     P[8][3] * SK_MY[2] - P[8][17] * SK_MY[1] -
+                                     P[8][16] * SK_MY[3] + P[8][18] * SK_MY[4]);
+            Kfusion[9] = SK_MY[0] * (P[9][20] + P[9][0] * SH_MAG[2] +
+                                     P[9][1] * SH_MAG[1] + P[9][2] * SH_MAG[0] -
+                                     P[9][3] * SK_MY[2] - P[9][17] * SK_MY[1] -
+                                     P[9][16] * SK_MY[3] + P[9][18] * SK_MY[4]);
+            Kfusion[10] =
+                SK_MY[0] * (P[10][20] + P[10][0] * SH_MAG[2] +
+                            P[10][1] * SH_MAG[1] + P[10][2] * SH_MAG[0] -
+                            P[10][3] * SK_MY[2] - P[10][17] * SK_MY[1] -
+                            P[10][16] * SK_MY[3] + P[10][18] * SK_MY[4]);
+            Kfusion[11] =
+                SK_MY[0] * (P[11][20] + P[11][0] * SH_MAG[2] +
+                            P[11][1] * SH_MAG[1] + P[11][2] * SH_MAG[0] -
+                            P[11][3] * SK_MY[2] - P[11][17] * SK_MY[1] -
+                            P[11][16] * SK_MY[3] + P[11][18] * SK_MY[4]);
+            Kfusion[12] =
+                SK_MY[0] * (P[12][20] + P[12][0] * SH_MAG[2] +
+                            P[12][1] * SH_MAG[1] + P[12][2] * SH_MAG[0] -
+                            P[12][3] * SK_MY[2] - P[12][17] * SK_MY[1] -
+                            P[12][16] * SK_MY[3] + P[12][18] * SK_MY[4]);
+            // this term has been zeroed to improve stability of the Z accel
+            // bias
+            Kfusion[13] = 0.0f;  // SK_MY[0]*(P[13][20] + P[13][0]*SH_MAG[2] +
+                                 // P[13][1]*SH_MAG[1] + P[13][2]*SH_MAG[0] -
+                                 // P[13][3]*SK_MY[2] - P[13][17]*SK_MY[1] -
+                                 // P[13][16]*SK_MY[3] + P[13][18]*SK_MY[4]);
+            // zero Kalman gains to inhibit wind state estimation
+            if (!inhibitWindStates) {
+                Kfusion[14] =
+                    SK_MY[0] * (P[14][20] + P[14][0] * SH_MAG[2] +
+                                P[14][1] * SH_MAG[1] + P[14][2] * SH_MAG[0] -
+                                P[14][3] * SK_MY[2] - P[14][17] * SK_MY[1] -
+                                P[14][16] * SK_MY[3] + P[14][18] * SK_MY[4]);
+                Kfusion[15] =
+                    SK_MY[0] * (P[15][20] + P[15][0] * SH_MAG[2] +
+                                P[15][1] * SH_MAG[1] + P[15][2] * SH_MAG[0] -
+                                P[15][3] * SK_MY[2] - P[15][17] * SK_MY[1] -
+                                P[15][16] * SK_MY[3] + P[15][18] * SK_MY[4]);
+            } else {
+                Kfusion[14] = 0.0;
+                Kfusion[15] = 0.0;
+            }
+            // zero Kalman gains to inhibit magnetic field state estimation
+            if (!inhibitMagStates) {
+                Kfusion[16] =
+                    SK_MY[0] * (P[16][20] + P[16][0] * SH_MAG[2] +
+                                P[16][1] * SH_MAG[1] + P[16][2] * SH_MAG[0] -
+                                P[16][3] * SK_MY[2] - P[16][17] * SK_MY[1] -
+                                P[16][16] * SK_MY[3] + P[16][18] * SK_MY[4]);
+                Kfusion[17] =
+                    SK_MY[0] * (P[17][20] + P[17][0] * SH_MAG[2] +
+                                P[17][1] * SH_MAG[1] + P[17][2] * SH_MAG[0] -
+                                P[17][3] * SK_MY[2] - P[17][17] * SK_MY[1] -
+                                P[17][16] * SK_MY[3] + P[17][18] * SK_MY[4]);
+                Kfusion[18] =
+                    SK_MY[0] * (P[18][20] + P[18][0] * SH_MAG[2] +
+                                P[18][1] * SH_MAG[1] + P[18][2] * SH_MAG[0] -
+                                P[18][3] * SK_MY[2] - P[18][17] * SK_MY[1] -
+                                P[18][16] * SK_MY[3] + P[18][18] * SK_MY[4]);
+                Kfusion[19] =
+                    SK_MY[0] * (P[19][20] + P[19][0] * SH_MAG[2] +
+                                P[19][1] * SH_MAG[1] + P[19][2] * SH_MAG[0] -
+                                P[19][3] * SK_MY[2] - P[19][17] * SK_MY[1] -
+                                P[19][16] * SK_MY[3] + P[19][18] * SK_MY[4]);
+                Kfusion[20] =
+                    SK_MY[0] * (P[20][20] + P[20][0] * SH_MAG[2] +
+                                P[20][1] * SH_MAG[1] + P[20][2] * SH_MAG[0] -
+                                P[20][3] * SK_MY[2] - P[20][17] * SK_MY[1] -
+                                P[20][16] * SK_MY[3] + P[20][18] * SK_MY[4]);
+                Kfusion[21] =
+                    SK_MY[0] * (P[21][20] + P[21][0] * SH_MAG[2] +
+                                P[21][1] * SH_MAG[1] + P[21][2] * SH_MAG[0] -
+                                P[21][3] * SK_MY[2] - P[21][17] * SK_MY[1] -
+                                P[21][16] * SK_MY[3] + P[21][18] * SK_MY[4]);
+            } else {
+                for (uint8_t i = 16; i <= 21; i++) {
+                    Kfusion[i] = 0.0f;
+                }
+            }
+
+            // calculate the observation innovation variance
+            varInnovMag.v[1] = 1.0f / SK_MY[0];
+
+            // set flags to indicate to other processes that fusion has been
+            // performede and is required on the next frame this can be used by
+            // other fusion processes to avoid fusing on the same frame as this
+            // expensive step
+            magFusePerformed = true;
+            magFuseRequired = true;
+        } else if (*obsIndex == 2)  // we are now fusing the Z measurement
+        {
+            // calculate observation jacobians
+            for (uint8_t i = 0; i <= 21; i++) H_MAG[i] = 0;
+            H_MAG[0] = SH_MAG[1];
+            H_MAG[1] = 2 * *magN * *q3 - 2 * *magE * *q0 - 2 * *magD * *q1;
+            H_MAG[2] = SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2;
+            H_MAG[3] = SH_MAG[0];
+            H_MAG[16] = 2 * *q0 * *q2 + 2 * *q1 * *q3;
+            H_MAG[17] = 2 * *q2 * *q3 - 2 * *q0 * *q1;
+            H_MAG[18] = SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6];
+            H_MAG[21] = 1;
+
+            // calculate Kalman gain
+            float temp =
+                (P[21][21] + *R_MAG + P[0][21] * SH_MAG[1] +
+                 P[3][21] * SH_MAG[0] +
+                 P[18][21] * (SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) -
+                 (2 * *magD * *q1 + 2 * *magE * *q0 - 2 * *magN * *q3) *
+                     (P[21][1] + P[0][1] * SH_MAG[1] + P[3][1] * SH_MAG[0] +
+                      P[18][1] *
+                          (SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) +
+                      P[16][1] * (2 * *q0 * *q2 + 2 * *q1 * *q3) -
+                      P[17][1] * (2 * *q0 * *q1 - 2 * *q2 * *q3) -
+                      P[1][1] * (2 * *magD * *q1 + 2 * *magE * *q0 -
+                                 2 * *magN * *q3) +
+                      P[2][1] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2) *
+                     (P[21][2] + P[0][2] * SH_MAG[1] + P[3][2] * SH_MAG[0] +
+                      P[18][2] *
+                          (SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) +
+                      P[16][2] * (2 * *q0 * *q2 + 2 * *q1 * *q3) -
+                      P[17][2] * (2 * *q0 * *q1 - 2 * *q2 * *q3) -
+                      P[1][2] * (2 * *magD * *q1 + 2 * *magE * *q0 -
+                                 2 * *magN * *q3) +
+                      P[2][2] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 SH_MAG[1] *
+                     (P[21][0] + P[0][0] * SH_MAG[1] + P[3][0] * SH_MAG[0] +
+                      P[18][0] *
+                          (SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) +
+                      P[16][0] * (2 * *q0 * *q2 + 2 * *q1 * *q3) -
+                      P[17][0] * (2 * *q0 * *q1 - 2 * *q2 * *q3) -
+                      P[1][0] * (2 * *magD * *q1 + 2 * *magE * *q0 -
+                                 2 * *magN * *q3) +
+                      P[2][0] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 SH_MAG[0] *
+                     (P[21][3] + P[0][3] * SH_MAG[1] + P[3][3] * SH_MAG[0] +
+                      P[18][3] *
+                          (SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) +
+                      P[16][3] * (2 * *q0 * *q2 + 2 * *q1 * *q3) -
+                      P[17][3] * (2 * *q0 * *q1 - 2 * *q2 * *q3) -
+                      P[1][3] * (2 * *magD * *q1 + 2 * *magE * *q0 -
+                                 2 * *magN * *q3) +
+                      P[2][3] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 (SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) *
+                     (P[21][18] + P[0][18] * SH_MAG[1] + P[3][18] * SH_MAG[0] +
+                      P[18][18] *
+                          (SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) +
+                      P[16][18] * (2 * *q0 * *q2 + 2 * *q1 * *q3) -
+                      P[17][18] * (2 * *q0 * *q1 - 2 * *q2 * *q3) -
+                      P[1][18] * (2 * *magD * *q1 + 2 * *magE * *q0 -
+                                  2 * *magN * *q3) +
+                      P[2][18] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 P[16][21] * (2 * *q0 * *q2 + 2 * *q1 * *q3) -
+                 P[17][21] * (2 * *q0 * *q1 - 2 * *q2 * *q3) -
+                 P[1][21] *
+                     (2 * *magD * *q1 + 2 * *magE * *q0 - 2 * *magN * *q3) +
+                 (2 * *q0 * *q2 + 2 * *q1 * *q3) *
+                     (P[21][16] + P[0][16] * SH_MAG[1] + P[3][16] * SH_MAG[0] +
+                      P[18][16] *
+                          (SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) +
+                      P[16][16] * (2 * *q0 * *q2 + 2 * *q1 * *q3) -
+                      P[17][16] * (2 * *q0 * *q1 - 2 * *q2 * *q3) -
+                      P[1][16] * (2 * *magD * *q1 + 2 * *magE * *q0 -
+                                  2 * *magN * *q3) +
+                      P[2][16] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) -
+                 (2 * *q0 * *q1 - 2 * *q2 * *q3) *
+                     (P[21][17] + P[0][17] * SH_MAG[1] + P[3][17] * SH_MAG[0] +
+                      P[18][17] *
+                          (SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) +
+                      P[16][17] * (2 * *q0 * *q2 + 2 * *q1 * *q3) -
+                      P[17][17] * (2 * *q0 * *q1 - 2 * *q2 * *q3) -
+                      P[1][17] * (2 * *magD * *q1 + 2 * *magE * *q0 -
+                                  2 * *magN * *q3) +
+                      P[2][17] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
+                 P[2][21] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2));
+            if (temp >= *R_MAG) {
+                SK_MZ[0] = 1.0f / temp;
+                faultStatus.bad_zmag = false;
+            } else {
+                // the calculation is badly conditioned, so we cannot perform
+                // fusion on this step we increase the state variances and try
+                // again next time
+                P[21][21] += 0.1f * *R_MAG;
+                *obsIndex = 3;
+                faultStatus.bad_zmag = true;
+                return;
+            }
+            SK_MZ[1] = SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6];
+            SK_MZ[2] = 2 * *magD * *q1 + 2 * *magE * *q0 - 2 * *magN * *q3;
+            SK_MZ[3] = SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2;
+            SK_MZ[4] = 2 * *q0 * *q1 - 2 * *q2 * *q3;
+            SK_MZ[5] = 2 * *q0 * *q2 + 2 * *q1 * *q3;
+            Kfusion[0] = SK_MZ[0] * (P[0][21] + P[0][0] * SH_MAG[1] +
+                                     P[0][3] * SH_MAG[0] - P[0][1] * SK_MZ[2] +
+                                     P[0][2] * SK_MZ[3] + P[0][18] * SK_MZ[1] +
+                                     P[0][16] * SK_MZ[5] - P[0][17] * SK_MZ[4]);
+            Kfusion[1] = SK_MZ[0] * (P[1][21] + P[1][0] * SH_MAG[1] +
+                                     P[1][3] * SH_MAG[0] - P[1][1] * SK_MZ[2] +
+                                     P[1][2] * SK_MZ[3] + P[1][18] * SK_MZ[1] +
+                                     P[1][16] * SK_MZ[5] - P[1][17] * SK_MZ[4]);
+            Kfusion[2] = SK_MZ[0] * (P[2][21] + P[2][0] * SH_MAG[1] +
+                                     P[2][3] * SH_MAG[0] - P[2][1] * SK_MZ[2] +
+                                     P[2][2] * SK_MZ[3] + P[2][18] * SK_MZ[1] +
+                                     P[2][16] * SK_MZ[5] - P[2][17] * SK_MZ[4]);
+            Kfusion[3] = SK_MZ[0] * (P[3][21] + P[3][0] * SH_MAG[1] +
+                                     P[3][3] * SH_MAG[0] - P[3][1] * SK_MZ[2] +
+                                     P[3][2] * SK_MZ[3] + P[3][18] * SK_MZ[1] +
+                                     P[3][16] * SK_MZ[5] - P[3][17] * SK_MZ[4]);
+            Kfusion[4] = SK_MZ[0] * (P[4][21] + P[4][0] * SH_MAG[1] +
+                                     P[4][3] * SH_MAG[0] - P[4][1] * SK_MZ[2] +
+                                     P[4][2] * SK_MZ[3] + P[4][18] * SK_MZ[1] +
+                                     P[4][16] * SK_MZ[5] - P[4][17] * SK_MZ[4]);
+            Kfusion[5] = SK_MZ[0] * (P[5][21] + P[5][0] * SH_MAG[1] +
+                                     P[5][3] * SH_MAG[0] - P[5][1] * SK_MZ[2] +
+                                     P[5][2] * SK_MZ[3] + P[5][18] * SK_MZ[1] +
+                                     P[5][16] * SK_MZ[5] - P[5][17] * SK_MZ[4]);
+            Kfusion[6] = SK_MZ[0] * (P[6][21] + P[6][0] * SH_MAG[1] +
+                                     P[6][3] * SH_MAG[0] - P[6][1] * SK_MZ[2] +
+                                     P[6][2] * SK_MZ[3] + P[6][18] * SK_MZ[1] +
+                                     P[6][16] * SK_MZ[5] - P[6][17] * SK_MZ[4]);
+            Kfusion[7] = SK_MZ[0] * (P[7][21] + P[7][0] * SH_MAG[1] +
+                                     P[7][3] * SH_MAG[0] - P[7][1] * SK_MZ[2] +
+                                     P[7][2] * SK_MZ[3] + P[7][18] * SK_MZ[1] +
+                                     P[7][16] * SK_MZ[5] - P[7][17] * SK_MZ[4]);
+            Kfusion[8] = SK_MZ[0] * (P[8][21] + P[8][0] * SH_MAG[1] +
+                                     P[8][3] * SH_MAG[0] - P[8][1] * SK_MZ[2] +
+                                     P[8][2] * SK_MZ[3] + P[8][18] * SK_MZ[1] +
+                                     P[8][16] * SK_MZ[5] - P[8][17] * SK_MZ[4]);
+            Kfusion[9] = SK_MZ[0] * (P[9][21] + P[9][0] * SH_MAG[1] +
+                                     P[9][3] * SH_MAG[0] - P[9][1] * SK_MZ[2] +
+                                     P[9][2] * SK_MZ[3] + P[9][18] * SK_MZ[1] +
+                                     P[9][16] * SK_MZ[5] - P[9][17] * SK_MZ[4]);
+            Kfusion[10] =
+                SK_MZ[0] * (P[10][21] + P[10][0] * SH_MAG[1] +
+                            P[10][3] * SH_MAG[0] - P[10][1] * SK_MZ[2] +
+                            P[10][2] * SK_MZ[3] + P[10][18] * SK_MZ[1] +
+                            P[10][16] * SK_MZ[5] - P[10][17] * SK_MZ[4]);
+            Kfusion[11] =
+                SK_MZ[0] * (P[11][21] + P[11][0] * SH_MAG[1] +
+                            P[11][3] * SH_MAG[0] - P[11][1] * SK_MZ[2] +
+                            P[11][2] * SK_MZ[3] + P[11][18] * SK_MZ[1] +
+                            P[11][16] * SK_MZ[5] - P[11][17] * SK_MZ[4]);
+            Kfusion[12] =
+                SK_MZ[0] * (P[12][21] + P[12][0] * SH_MAG[1] +
+                            P[12][3] * SH_MAG[0] - P[12][1] * SK_MZ[2] +
+                            P[12][2] * SK_MZ[3] + P[12][18] * SK_MZ[1] +
+                            P[12][16] * SK_MZ[5] - P[12][17] * SK_MZ[4]);
+            // this term has been zeroed to improve stability of the Z accel
+            // bias
+            Kfusion[13] = 0.0f;  // SK_MZ[0]*(P[13][21] + P[13][0]*SH_MAG[1] +
+                                 // P[13][3]*SH_MAG[0] - P[13][1]*SK_MZ[2] +
+                                 // P[13][2]*SK_MZ[3] + P[13][18]*SK_MZ[1] +
+                                 // P[13][16]*SK_MZ[5] - P[13][17]*SK_MZ[4]);
+            // zero Kalman gains to inhibit wind state estimation
+            if (!inhibitWindStates) {
+                Kfusion[14] =
+                    SK_MZ[0] * (P[14][21] + P[14][0] * SH_MAG[1] +
+                                P[14][3] * SH_MAG[0] - P[14][1] * SK_MZ[2] +
+                                P[14][2] * SK_MZ[3] + P[14][18] * SK_MZ[1] +
+                                P[14][16] * SK_MZ[5] - P[14][17] * SK_MZ[4]);
+                Kfusion[15] =
+                    SK_MZ[0] * (P[15][21] + P[15][0] * SH_MAG[1] +
+                                P[15][3] * SH_MAG[0] - P[15][1] * SK_MZ[2] +
+                                P[15][2] * SK_MZ[3] + P[15][18] * SK_MZ[1] +
+                                P[15][16] * SK_MZ[5] - P[15][17] * SK_MZ[4]);
+            } else {
+                Kfusion[14] = 0.0;
+                Kfusion[15] = 0.0;
+            }
+            // zero Kalman gains to inhibit magnetic field state estimation
+            if (!inhibitMagStates) {
+                Kfusion[16] =
+                    SK_MZ[0] * (P[16][21] + P[16][0] * SH_MAG[1] +
+                                P[16][3] * SH_MAG[0] - P[16][1] * SK_MZ[2] +
+                                P[16][2] * SK_MZ[3] + P[16][18] * SK_MZ[1] +
+                                P[16][16] * SK_MZ[5] - P[16][17] * SK_MZ[4]);
+                Kfusion[17] =
+                    SK_MZ[0] * (P[17][21] + P[17][0] * SH_MAG[1] +
+                                P[17][3] * SH_MAG[0] - P[17][1] * SK_MZ[2] +
+                                P[17][2] * SK_MZ[3] + P[17][18] * SK_MZ[1] +
+                                P[17][16] * SK_MZ[5] - P[17][17] * SK_MZ[4]);
+                Kfusion[18] =
+                    SK_MZ[0] * (P[18][21] + P[18][0] * SH_MAG[1] +
+                                P[18][3] * SH_MAG[0] - P[18][1] * SK_MZ[2] +
+                                P[18][2] * SK_MZ[3] + P[18][18] * SK_MZ[1] +
+                                P[18][16] * SK_MZ[5] - P[18][17] * SK_MZ[4]);
+                Kfusion[19] =
+                    SK_MZ[0] * (P[19][21] + P[19][0] * SH_MAG[1] +
+                                P[19][3] * SH_MAG[0] - P[19][1] * SK_MZ[2] +
+                                P[19][2] * SK_MZ[3] + P[19][18] * SK_MZ[1] +
+                                P[19][16] * SK_MZ[5] - P[19][17] * SK_MZ[4]);
+                Kfusion[20] =
+                    SK_MZ[0] * (P[20][21] + P[20][0] * SH_MAG[1] +
+                                P[20][3] * SH_MAG[0] - P[20][1] * SK_MZ[2] +
+                                P[20][2] * SK_MZ[3] + P[20][18] * SK_MZ[1] +
+                                P[20][16] * SK_MZ[5] - P[20][17] * SK_MZ[4]);
+                Kfusion[21] =
+                    SK_MZ[0] * (P[21][21] + P[21][0] * SH_MAG[1] +
+                                P[21][3] * SH_MAG[0] - P[21][1] * SK_MZ[2] +
+                                P[21][2] * SK_MZ[3] + P[21][18] * SK_MZ[1] +
+                                P[21][16] * SK_MZ[5] - P[21][17] * SK_MZ[4]);
+            } else {
+                for (uint8_t i = 16; i <= 21; i++) {
+                    Kfusion[i] = 0.0f;
+                }
+            }
+
+            // calculate the observation innovation variance
+            varInnovMag.v[2] = 1.0f / SK_MZ[0];
+
+            // set flags to indicate to other processes that fusion has been
+            // performede and is required on the next frame this can be used by
+            // other fusion processes to avoid fusing on the same frame as this
+            // expensive step
+            magFusePerformed = true;
+            magFuseRequired = false;
+        }
+        // calculate the measurement innovation
+        innovMag.v[*obsIndex] = MagPred->v[*obsIndex] - magData.v[*obsIndex];
+        // calculate the innovation test ratio
+        magTestRatio.v[*obsIndex] =
+            sq(innovMag.v[*obsIndex]) /
+            (sq(_magInnovGate) * varInnovMag.v[*obsIndex]);
+        // check the last values from all components and set magnetometer health
+        // accordingly
+        magHealth = (magTestRatio.v[0] < 1.0f && magTestRatio.v[1] < 1.0f &&
+                     magTestRatio.v[2] < 1.0f);
+        // Don't fuse unless all componenets pass. The exception is if the bad
+        // health has timed out and we are not a fly forward vehicle In this
+        // case we might as well try using the magnetometer, but with a reduced
+        // weighting
+        if (magHealth || ((magTestRatio.v[*obsIndex] < 1.0f) &&
+                          !STATE(FIXED_WING_LEGACY) && magTimeout)) {
+            // Attitude, velocity and position corrections are averaged across
+            // multiple prediction cycles between now and the anticipated time
+            // for the next measurement. Don't do averaging of quaternion state
+            // corrections if total angle change across predicted interval is
+            // going to exceed 0.1 rad
+            bool highRates =
+                ((magUpdateCountMax * calc_length_pythagorean_3D(
+                                          correctedDelAng.x, correctedDelAng.y,
+                                          correctedDelAng.z)) > 0.1f);
+            // Calculate the number of averaging frames left to go. This is
+            // required becasue magnetometer fusion is applied across three
+            // consecutive prediction cycles There is no point averaging if the
+            // number of cycles left is less than 2
+            float minorFramesToGo =
+                (float)magUpdateCountMax - (float)magUpdateCount;
+            // correct the state vector or store corrections to be applied
+            // incrementally
+            for (uint8_t j = 0; j <= 21; j++) {
+                // If we are forced to use a bad compass, we reduce the
+                // weighting by a factor of 4
+                if (!magHealth) {
+                    Kfusion[j] *= 0.25f;
+                }
+                if ((j <= 3 && highRates) || j >= 10 || staticMode ||
+                    minorFramesToGo < 1.5f) {
+                    states[j] = states[j] - Kfusion[j] * innovMag.v[*obsIndex];
+                } else {
+                    // scale the correction based on the number of averaging
+                    // frames left to go
+                    magIncrStateDelta[j] -=
+                        Kfusion[j] * innovMag.v[*obsIndex] *
+                        (magUpdateCountMaxInv * (float)magUpdateCountMax /
+                         minorFramesToGo);
+                }
+            }
+
+            // normalise the quaternion states
+            quaternionNormalize(&state->quat, &state->quat);
+
+            // correct the covariance P = (I - K*H)*P
+            // take advantage of the empty columns in KH to reduce the
+            // number of operations
+            for (uint8_t i = 0; i <= 21; i++) {
+                for (uint8_t j = 0; j <= 3; j++) {
+                    KH[i][j] = Kfusion[i] * H_MAG[j];
+                }
+                for (uint8_t j = 4; j <= 15; j++) {
+                    KH[i][j] = 0.0f;
+                }
+                if (!inhibitMagStates) {
+                    for (uint8_t j = 16; j <= 21; j++) {
+                        KH[i][j] = Kfusion[i] * H_MAG[j];
+                    }
+                } else {
+                    for (uint8_t j = 16; j <= 21; j++) {
+                        KH[i][j] = 0.0f;
+                    }
+                }
+            }
+            for (uint8_t i = 0; i <= 21; i++) {
+                for (uint8_t j = 0; j <= 21; j++) {
+                    KHP[i][j] = 0;
+                    for (uint8_t k = 0; k <= 3; k++) {
+                        KHP[i][j] = KHP[i][j] + KH[i][k] * P[k][j];
+                    }
+                    if (!inhibitMagStates) {
+                        for (uint8_t k = 16; k <= 21; k++) {
+                            KHP[i][j] = KHP[i][j] + KH[i][k] * P[k][j];
+                        }
+                    }
+                }
+            }
+            for (uint8_t i = 0; i <= 21; i++) {
+                for (uint8_t j = 0; j <= 21; j++) {
+                    P[i][j] = P[i][j] - KHP[i][j];
+                }
+            }
+        }
+        *obsIndex = *obsIndex + 1;
+    } else {
+        // set flags to indicate to other processes that fusion has not been
+        // performed and is not required on the next time step
+        magFusePerformed = false;
+        magFuseRequired = false;
+    }
+
+    // force the covariance matrix to be symmetrical and limit the variances to
+    // prevent ill-condiioning.
+    ekf_ForceSymmetry();
+    ekf_ConstrainVariances();
+}
+
+// select fusion of magnetometer data
+void ekf_SelectMagFusion(void)
+{
+    if (!magFailed) {
+        // check for and read new magnetometer measurements
+        ekf_readMagData();
+
+        // If we are using the compass and the magnetometer has been unhealthy
+        // for too long we declare a timeout If we have a vehicle that can fly
+        // without a compass (a vehicle that doesn't have significant sideslip)
+        // then the compass is permanently failed and will not be used until the
+        // filter is reset
+        if (magHealth) {
+            lastHealthyMagTime_ms = imuSampleTime_ms;
+        } else {
+            if ((imuSampleTime_ms - lastHealthyMagTime_ms) >
+                    _magFailTimeLimit_ms &&
+                ekf_use_compass()) {
+                magTimeout = true;
+                if (STATE(FIXED_WING_LEGACY)) {
+                    magFailed = true;
+                }
+            } else {
+                magTimeout = false;
+            }
+        }
+
+        // determine if conditions are right to start a new fusion cycle
+        bool dataReady = statesInitialised && ekf_use_compass() && newDataMag;
+        if (dataReady) {
+            fuseMagData = true;
+            // reset state updates and counter used to spread fusion updates
+            // across several frames to reduce 10Hz pulsing
+            memset(&magIncrStateDelta[0], 0, sizeof(magIncrStateDelta));
+            magUpdateCount = 0;
+        } else {
+            fuseMagData = false;
+        }
+
+        // call the function that performs fusion of magnetometer data
+        ekf_FuseMagnetometer();
+
+        // Fuse corrections to quaternion, position and velocity states across
+        // several time steps to reduce 10Hz pulsing in the output
+        if (magUpdateCount < magUpdateCountMax) {
+            magUpdateCount++;
+            for (uint8_t i = 0; i <= 9; i++) {
+                states[i] += magIncrStateDelta[i];
+            }
         }
     }
 }
@@ -3873,9 +4878,6 @@ void ekf_UpdateFilter(void)
     // check if on ground
     ekf_OnGroundCheck();
 
-    // define rules used to set staticMode
-    // staticMode enables ground operation without GPS by fusing zeros for
-    // position and height measurements
     if (ekf_static_mode_demanded()) {
         staticMode = true;
     } else {
@@ -3921,7 +4923,7 @@ void ekf_UpdateFilter(void)
     // Update states using GPS, altimeter, compass, airspeed and synthetic
     // sideslip observations
     ekf_SelectVelPosFusion();
-    // SelectMagFusion();
+    ekf_SelectMagFusion();
     // SelectTasFusion();
     // SelectBetaFusion();
 }
@@ -3997,7 +4999,7 @@ void ekf_update(float deltaTime)
             }
 
             if (millis() - start_time_ms > 30000) {
-                // FLAG_ARMED = true;
+                FLAG_ARMED = true;
             }
 
             fpVector3_t _relpos_cm;    // NEU
