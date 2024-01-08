@@ -88,7 +88,7 @@ tables:
     values: ["NONE", "AGL", "FLOW_RAW", "FLOW", "ALWAYS", "SAG_COMP_VOLTAGE",
       "VIBE", "CRUISE", "REM_FLIGHT_TIME", "SMARTAUDIO", "ACC",
       "NAV_YAW", "PCF8574", "DYN_GYRO_LPF", "AUTOLEVEL", "ALTITUDE",
-      "AUTOTRIM", "AUTOTUNE", "RATE_DYNAMICS", "LANDING", "POS_EST"]
+      "AUTOTRIM", "AUTOTUNE", "RATE_DYNAMICS", "LANDING", "POS_EST", "EKF"]
   - name: aux_operator
     values: ["OR", "AND"]
     enum: modeActivationOperator_e
@@ -1602,6 +1602,17 @@ groups:
         type: uint16_t
         min: 1
         max: 3000
+
+  - name: PG_EKF_CONFIG
+    type: ekfConfig_t
+    headers: [ "navigation/ekf.h" ]
+    members:
+      - name: ekf_enabled
+        description: "Extended Kalman Filter ON/OFF"
+        default_value: ON
+        field: ekfEnabled
+        type: bool
+
   - name: PG_GPS_CONFIG
     headers: [ "io/gps.h" ]
     type: gpsConfig_t

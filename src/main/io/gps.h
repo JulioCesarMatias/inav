@@ -133,6 +133,8 @@ typedef struct gpsSolutionData_s {
     gpsFixType_e fixType;
     uint8_t numSat;
 
+    float speed_accuracy;
+
     gpsLocation_t llh;
     int16_t       velNED[3];
 

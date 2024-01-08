@@ -53,6 +53,7 @@
 #include "io/beeper.h"
 #include "io/gps.h"
 
+#include "navigation/ekf.h"
 #include "navigation/navigation.h"
 #include "navigation/navigation_private.h"
 
@@ -2317,7 +2318,17 @@ void updateActualHeading(bool headingValid, int32_t newHeading, int32_t newGroun
  *-----------------------------------------------------------*/
 const navEstimatedPosVel_t * navGetCurrentActualPositionAndVelocity(void)
 {
-    return posControl.flags.isTerrainFollowEnabled ? &posControl.actualState.agl : &posControl.actualState.abs;
+    navEstimatedPosVel_t *retPosVel = &posControl.actualState.abs;
+
+    if (posControl.flags.isTerrainFollowEnabled) {
+        retPosVel = &posControl.actualState.agl;
+    } else {
+        if (ekf_HealthyToUse()) {
+            //retPosVel = &ekfPosVel;
+        }
+    }
+    
+    return retPosVel;
 }
 
 /*-----------------------------------------------------------

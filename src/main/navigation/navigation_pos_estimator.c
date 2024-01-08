@@ -42,6 +42,7 @@
 
 #include "io/gps.h"
 
+#include "navigation/ekf.h"
 #include "navigation/navigation.h"
 #include "navigation/navigation_private.h"
 #include "navigation/navigation_pos_estimator_private.h"
@@ -54,7 +55,6 @@
 #include "sensors/opflow.h"
 
 navigationPosEstimator_t posEstimator;
-static float initialBaroAltitudeOffset = 0.0f;
 
 PG_REGISTER_WITH_RESET_TEMPLATE(positionEstimationConfig_t, positionEstimationConfig, PG_POSITION_ESTIMATION_CONFIG, 5);
 
@@ -122,10 +122,10 @@ static bool shouldResetReferenceAltitude(void)
 
     if (ARMING_FLAG(ARMED) && emergRearmResetCheck) {
         if (STATE(IN_FLIGHT_EMERG_REARM)) {
-            initialBaroAltitudeOffset = backupInitialBaroAltitudeOffset;
+            posEstimator.baro.altOffSet = backupInitialBaroAltitudeOffset;
             posControl.gpsOrigin.alt = backupGpsOriginAltitude;
         } else {
-            backupInitialBaroAltitudeOffset = initialBaroAltitudeOffset;
+            backupInitialBaroAltitudeOffset = posEstimator.baro.altOffSet;
             backupGpsOriginAltitude = posControl.gpsOrigin.alt;
         }
     }
@@ -255,6 +255,7 @@ void onNewGPSData(void)
             if (positionEstimationConfig()->automatic_mag_declination && !magDeclinationSet) {
                 const float declination = geoCalculateMagDeclination(&newLLH);
                 imuSetMagneticDeclination(declination);
+                ekf_setMagDeclination(declination);
                 magDeclinationSet = true;
             }
         }
@@ -343,23 +344,24 @@ void onNewGPSData(void)
  */
 void updatePositionEstimator_BaroTopic(timeUs_t currentTimeUs)
 {
-    float newBaroAlt = baroCalculateAltitude();
+    posEstimator.baro.rawAlt = (float)baroCalculateAltitude();
 
     /* If we are required - keep altitude at zero */
     if (shouldResetReferenceAltitude()) {
-        initialBaroAltitudeOffset = newBaroAlt;
+        posEstimator.baro.altOffSet = posEstimator.baro.rawAlt;
     }
+    
+    baro.calibrationFinished = baroIsCalibrationComplete();
 
-    if (sensors(SENSOR_BARO) && baroIsCalibrationComplete()) {
+    if (sensors(SENSOR_BARO) && baro.calibrationFinished) {
         const timeUs_t baroDtUs = currentTimeUs - posEstimator.baro.lastUpdateTime;
 
-        posEstimator.baro.alt = newBaroAlt - initialBaroAltitudeOffset;
+        posEstimator.baro.alt = posEstimator.baro.rawAlt - posEstimator.baro.altOffSet;
         posEstimator.baro.epv = positionEstimationConfig()->baro_epv;
         posEstimator.baro.lastUpdateTime = currentTimeUs;
 
         if (baroDtUs <= MS2US(INAV_BARO_TIMEOUT_MS)) {
             posEstimator.baro.alt = pt1FilterApply3(&posEstimator.baro.avgFilter, posEstimator.baro.alt, US2S(baroDtUs));
-
             // baro altitude rate
             static float baroAltPrevious = 0;
             posEstimator.baro.baroAltRate = (posEstimator.baro.alt - baroAltPrevious) / US2S(baroDtUs);
@@ -399,7 +401,7 @@ static void restartGravityCalibration(void)
     zeroCalibrationStartS(&posEstimator.imu.gravityCalibration, CALIBRATING_GRAVITY_TIME_MS, positionEstimationConfig()->gravity_calibration_tolerance, false);
 }
 
-static bool gravityCalibrationComplete(void)
+bool gravityCalibrationComplete(void)
 {
     if (!gyroConfig()->init_gyro_cal_enabled) {
         return true;
@@ -969,9 +971,4 @@ void updatePositionEstimator(void)
 
     /* Publish estimate */
     publishEstimatedTopic(currentTimeUs);
-}
-
-bool navIsCalibrationComplete(void)
-{
-    return gravityCalibrationComplete();
 }

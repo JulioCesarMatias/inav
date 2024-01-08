@@ -507,7 +507,7 @@ int8_t navigationGetHeadingControlState(void);
 // were bypassed due to user input.
 navArmingBlocker_e navigationIsBlockingArming(bool *usedBypass);
 bool navigationPositionEstimateIsHealthy(void);
-bool navIsCalibrationComplete(void);
+bool gravityCalibrationComplete(void);
 bool navigationTerrainFollowingEnabled(void);
 
 /* Access to estimated position and velocity */

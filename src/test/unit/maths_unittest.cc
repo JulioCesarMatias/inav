@@ -27,6 +27,7 @@
 extern "C" {
     #include "common/maths.h"
     #include "common/vector.h"
+    #include "common/matrix.h"
 }
 
 #include "unittest_macros.h"
@@ -132,8 +133,8 @@ TEST(MathsUnittest, TestRotateVectorWithNoAngle)
     fp_angles_t euler_angles = {.raw={0.0f, 0.0f, 0.0f}};
 
     fpMatrix3_t rmat;
-    rotationMatrixFromAngles(&rmat, &euler_angles);
-    rotationMatrixRotateVector(&vector, &vector, &rmat);
+    matrixFromEuler(&rmat, euler_angles.angles.roll, euler_angles.angles.pitch, euler_angles.angles.yaw);
+    rotationMatrixByVector(&vector, &vector, &rmat);
 
     fpVector3_t expected_result = { 1.0f, 0.0f, 0.0f};
     expectVectorsAreEqual(&vector, &expected_result);
@@ -146,8 +147,8 @@ TEST(MathsUnittest, TestRotateVectorAroundAxis)
     fp_angles_t euler_angles = {.raw={90.0f, 0.0f, 0.0f}};
 
     fpMatrix3_t rmat;
-    rotationMatrixFromAngles(&rmat, &euler_angles);
-    rotationMatrixRotateVector(&vector, &vector, &rmat);
+    matrixFromEuler(&rmat, euler_angles.angles.roll, euler_angles.angles.pitch, euler_angles.angles.yaw);
+    rotationMatrixByVector(&vector, &vector, &rmat);
 
     fpVector3_t expected_result = { 1.0f, 0.0f, 0.0f};
     expectVectorsAreEqual(&vector, &expected_result);

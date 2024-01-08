@@ -249,8 +249,10 @@ STATIC_PROTOTHREAD(pitotThread)
 #endif
         ptYield();
 
+        pitot.calibrationFinished = pitotIsCalibrationComplete();
+
         // Calculate IAS
-        if (pitotIsCalibrationComplete()) {
+        if (pitot.calibrationFinished) {
             // NOTE ::
             // https://en.wikipedia.org/wiki/Indicated_airspeed
             // Indicated airspeed (IAS) is the airspeed read directly from the airspeed indicator on an aircraft, driven by the pitot-static system.

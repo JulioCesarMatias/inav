@@ -48,7 +48,8 @@ PG_DECLARE(pitotmeterConfig_t, pitotmeterConfig);
 typedef struct pito_s {
     pitotDev_t dev;
     float airSpeed;
-
+    
+    bool calibrationFinished;
     zeroCalibrationScalar_t zeroCalibration;
     pt1Filter_t lpfState;
     timeUs_t lastMeasurementUs;

@@ -161,7 +161,7 @@ bool areSensorsCalibrating(void)
     }
 #endif
 
-    if (!navIsCalibrationComplete() && isAccRequired()) {
+    if (!gravityCalibrationComplete() && isAccRequired()) {
         return true;
     }
 
@@ -883,7 +883,6 @@ static void applyThrottleTiltCompensation(void)
 
 void taskMainPidLoop(timeUs_t currentTimeUs)
 {
-
     cycleTime = getTaskDeltaTime(TASK_SELF);
     dT = (float)cycleTime * 0.000001f;
 
@@ -911,11 +910,11 @@ void taskMainPidLoop(timeUs_t currentTimeUs)
 #endif
 
     gyroFilter();
-
-    imuUpdateAccelerometer();
-    imuUpdateAttitude(currentTimeUs);
     
-    ekf_update(dT);
+    imuUpdateAccelerometer();
+    imuUpdateAttitude(dT);
+
+    ekf_Update(dT);
 
 #if defined(SITL_BUILD)
     }
@@ -931,8 +930,8 @@ void taskMainPidLoop(timeUs_t currentTimeUs)
 
     if (isRXDataNew) {
         updateWaypointsAndNavigationMode();
+        isRXDataNew = false;
     }
-    isRXDataNew = false;
 
     updatePositionEstimator();
     applyWaypointNavigationAndAltitudeHold();

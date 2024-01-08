@@ -192,7 +192,7 @@ void taskUpdateBaro(timeUs_t currentTimeUs)
     if (newDeadline != 0) {
         rescheduleTask(TASK_SELF, newDeadline);
     }
-
+    
     updatePositionEstimator_BaroTopic(currentTimeUs);
 }
 #endif
@@ -499,7 +499,7 @@ cfTask_t cfTasks[TASK_COUNT] = {
     [TASK_BARO] = {
         .taskName = "BARO",
         .taskFunc = taskUpdateBaro,
-        .desiredPeriod = TASK_PERIOD_HZ(20),
+        .desiredPeriod = TASK_PERIOD_HZ(10),      // Barometer is updated at 10 Hz
         .staticPriority = TASK_PRIORITY_MEDIUM,
     },
 #endif

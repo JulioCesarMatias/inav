@@ -64,6 +64,7 @@
 #include "sensors/gyro.h"
 #include "sensors/sensors.h"
 
+#include "navigation/ekf.h"
 
 /*
  *      X-axis = North/Forward
@@ -563,13 +564,13 @@ STATIC_UNIT_TESTED void imuUpdateEulerAngles(void)
 #endif
 	{
 		/* Compute pitch/roll angles */
-		//attitude.values.roll = RADIANS_TO_DECIDEGREES(atan2_approx(ahrsMatrix.m[2][1], ahrsMatrix.m[2][2]));
-		//attitude.values.pitch = RADIANS_TO_DECIDEGREES((0.5f * M_PIf) - acos_approx(-ahrsMatrix.m[2][0]));
-		//attitude.values.yaw = RADIANS_TO_DECIDEGREES(-atan2_approx(ahrsMatrix.m[1][0], ahrsMatrix.m[0][0]));
+		attitude.values.roll = RADIANS_TO_DECIDEGREES(atan2_approx(ahrsMatrix.m[2][1], ahrsMatrix.m[2][2]));
+		attitude.values.pitch = RADIANS_TO_DECIDEGREES((0.5f * M_PIf) - acos_approx(-ahrsMatrix.m[2][0]));
+		attitude.values.yaw = RADIANS_TO_DECIDEGREES(-atan2_approx(ahrsMatrix.m[1][0], ahrsMatrix.m[0][0]));
 	}
 
     if (attitude.values.yaw < 0)
-        //attitude.values.yaw += 3600;
+        attitude.values.yaw += 3600;
 
     /* Update small angle state */
     if (calculateCosTiltAngle() > smallAngleCosZ) {
@@ -825,25 +826,19 @@ void imuCheckVibrationLevels(void)
     // DEBUG_VIBE values 4-7 are used by NAV estimator
 }
 
-void imuUpdateAttitude(timeUs_t currentTimeUs)
+void imuUpdateAttitude(float deltaTime)
 {
-    /* Calculate dT */
-    static timeUs_t previousIMUUpdateTimeUs;
-    const float dT = (currentTimeUs - previousIMUUpdateTimeUs) * 1e-6;
-    previousIMUUpdateTimeUs = currentTimeUs;
-
     if (sensors(SENSOR_ACC) && isAccelUpdatedAtLeastOnce) {
         gyroGetMeasuredRotationRate(&imuMeasuredRotationBF);    // Calculate gyro rate in body frame in rad/s
         accGetMeasuredAcceleration(&imuMeasuredAccelBF);  // Calculate accel in body frame in cm/s/s
         imuCheckVibrationLevels();
-        imuCalculateEstimatedAttitude(dT);  // Update attitude estimate
+        imuCalculateEstimatedAttitude(deltaTime);  // Update attitude estimate
     } else {
         acc.accADCf[X] = 0.0f;
         acc.accADCf[Y] = 0.0f;
         acc.accADCf[Z] = 0.0f;
     }
 }
- 
 
 bool isImuReady(void)
 {
@@ -857,7 +852,13 @@ bool isImuHeadingValid(void)
 
 float calculateCosTiltAngle(void)
 {
-    return 1.0f - 2.0f * sq(orientation.q1) - 2.0f * sq(orientation.q2);
+    fpQuaternion_t quatRet = orientation;
+
+    if (ekf_HealthyToUse()) {
+        //quatRet = ekf_getQuaternion();
+    }
+
+    return 1.0f - 2.0f * sq(quatRet.q1) - 2.0f * sq(quatRet.q2);
 }
 
 #if defined(SITL_BUILD) || defined (USE_SIMULATOR)

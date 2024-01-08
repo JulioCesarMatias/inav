@@ -76,6 +76,7 @@
 #include "fc/settings.h"
 
 #include "navigation/navigation.h"
+#include "navigation/ekf.h"
 
 #ifndef DEFAULT_FEATURES
 #define DEFAULT_FEATURES 0
@@ -183,6 +184,12 @@ __attribute__((weak)) void targetConfiguration(void)
 
 uint32_t getLooptime(void)
 {
+    uint16_t newLooptime;
+    if (ekf_getLoopTime(&newLooptime))
+    {
+        return newLooptime;
+    }
+
     return gyroConfig()->looptime;
 }
 

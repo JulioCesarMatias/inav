@@ -77,7 +77,7 @@ typedef enum
 void imuConfigure(void);
 
 void imuSetMagneticDeclination(float declinationDeg);
-void imuUpdateAttitude(timeUs_t currentTimeUs);
+void imuUpdateAttitude(float deltaTime);
 void imuUpdateAccelerometer(void);
 float calculateCosTiltAngle(void);
 bool isImuReady(void);
@@ -87,8 +87,6 @@ void imuTransformVectorBodyToEarth(fpVector3_t * v);
 void imuTransformVectorEarthToBody(fpVector3_t * v);
 
 void imuInit(void);
-
-bool isGPSTrustworthy(void);
 
 #if defined(SITL_BUILD)
 void imuSetAttitudeRPY(int16_t roll, int16_t pitch, int16_t yaw);

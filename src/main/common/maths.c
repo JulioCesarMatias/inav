@@ -222,35 +222,6 @@ float scaleRangef(float x, float srcMin, float srcMax, float destMin, float dest
     return ((a / b) + destMin);
 }
 
-// Build rMat from Tait–Bryan angles (convention X1, Y2, Z3)
-void rotationMatrixFromAngles(fpMatrix3_t * rmat, const fp_angles_t * angles)
-{
-    float cosx, sinx, cosy, siny, cosz, sinz;
-    float coszcosx, sinzcosx, coszsinx, sinzsinx;
-
-    cosx = cos_approx(angles->angles.roll);
-    sinx = sin_approx(angles->angles.roll);
-    cosy = cos_approx(angles->angles.pitch);
-    siny = sin_approx(angles->angles.pitch);
-    cosz = cos_approx(angles->angles.yaw);
-    sinz = sin_approx(angles->angles.yaw);
-
-    coszcosx = cosz * cosx;
-    sinzcosx = sinz * cosx;
-    coszsinx = sinx * cosz;
-    sinzsinx = sinx * sinz;
-
-    rmat->m[0][X] = cosz * cosy;
-    rmat->m[0][Y] = -cosy * sinz;
-    rmat->m[0][Z] = siny;
-    rmat->m[1][X] = sinzcosx + (coszsinx * siny);
-    rmat->m[1][Y] = coszcosx - (sinzsinx * siny);
-    rmat->m[1][Z] = -sinx * cosy;
-    rmat->m[2][X] = (sinzsinx) - (coszcosx * siny);
-    rmat->m[2][Y] = (coszsinx) + (sinzcosx * siny);
-    rmat->m[2][Z] = cosy * cosx;
-}
-
 void rotationMatrixFromAxisAngle(fpMatrix3_t * rmat, const fpAxisAngle_t * a)
 {
     const float sang = sin_approx(a->angle);

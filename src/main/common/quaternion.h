@@ -225,12 +225,12 @@ static inline void quaternionToRotationMatrix(fpQuaternion_t q, fpMatrix3_t *m)
 // create a quaternion from Euler angles
 static inline void quaternionFromEuler(fpQuaternion_t *q, float roll, float pitch, float yaw)
 {
-    const float cr2 = cos(roll * 0.5f);
-    const float cp2 = cos(pitch * 0.5f);
-    const float cy2 = cos(yaw * 0.5f);
-    const float sr2 = sin(roll * 0.5f);
-    const float sp2 = sin(pitch * 0.5f);
-    const float sy2 = sin(yaw * 0.5f);
+    const float cr2 = cos_approx(roll * 0.5f);
+    const float cp2 = cos_approx(pitch * 0.5f);
+    const float cy2 = cos_approx(yaw * 0.5f);
+    const float sr2 = sin_approx(roll * 0.5f);
+    const float sp2 = sin_approx(pitch * 0.5f);
+    const float sy2 = sin_approx(yaw * 0.5f);
 
     q->q0 = cr2 * cp2 * cy2 + sr2 * sp2 * sy2;
     q->q1 = sr2 * cp2 * cy2 - cr2 * sp2 * sy2;
@@ -240,9 +240,25 @@ static inline void quaternionFromEuler(fpQuaternion_t *q, float roll, float pitc
 
 static inline void quaternionToEuler(fpQuaternion_t q, float *roll, float *pitch, float *yaw)
 {
-    *roll = atan2f(2.0f * (q.q0 * q.q1 + q.q2 * q.q3),
-                   1.0f - 2.0f * (q.q1 * q.q1 + q.q2 * q.q2));
-    *pitch = asin(2.0f * (q.q0 * q.q2 - q.q3 * q.q1));
-    *yaw = -atan2f(2.0f * (q.q0 * q.q3 + q.q1 * q.q2),
-                   1.0f - 2.0f * (q.q2 * q.q2 + q.q3 * q.q3));
+    *roll = atan2_approx(2.0f * (q.q0 * q.q1 + q.q2 * q.q3), 1.0f - 2.0f * (q.q1 * q.q1 + q.q2 * q.q2));
+    *pitch = asin_approx(2.0f * (q.q0 * q.q2 - q.q3 * q.q1));
+    *yaw = atan2_approx(2.0f * (q.q0 * q.q3 + q.q1 * q.q2), 1.0f - 2.0f * (q.q2 * q.q2 + q.q3 * q.q3));
+}
+
+static inline void QuaternionFromAxisAngle(fpVector3_t v, fpQuaternion_t *q) {
+    float theta = fast_fsqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
+
+    if (theta < 1.0e-12f) {
+        q->q0 = 1.0f;
+        q->q1 = q->q2 = q->q3 = 0.0f;
+        return;
+    }
+
+    vectorNormalize(&v, &v);
+    float st2 = sin_approx(theta / 2.0f);
+
+    q->q0 = cos_approx(theta / 2.0f);
+    q->q1 = v.x * st2;
+    q->q2 = v.y * st2;
+    q->q3 = v.z * st2;
 }

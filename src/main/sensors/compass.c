@@ -24,6 +24,7 @@
 
 #include "common/axis.h"
 #include "common/maths.h"
+#include "common/matrix.h"
 #include "common/utils.h"
 
 #include "config/parameter_group.h"
@@ -321,7 +322,7 @@ bool compassInit(void)
              .angles.pitch = DECIDEGREES_TO_RADIANS(compassConfig()->pitchDeciDegrees),
              .angles.yaw = DECIDEGREES_TO_RADIANS(compassConfig()->yawDeciDegrees),
         };
-        rotationMatrixFromAngles(&mag.dev.magAlign.externalRotation, &compassAngles);
+        matrixFromEuler(&mag.dev.magAlign.externalRotation, compassAngles.angles.roll, compassAngles.angles.pitch, compassAngles.angles.yaw);
     } else {
         mag.dev.magAlign.useExternal = false;
         if (compassConfig()->mag_align != ALIGN_DEFAULT) {
@@ -339,7 +340,7 @@ bool compassIsHealthy(void)
     return (mag.magADC[X] != 0) || (mag.magADC[Y] != 0) || (mag.magADC[Z] != 0);
 }
 
-timeMs_t compassLastUpdate(void)
+timeUs_t compassLastUpdate(void)
 {
     return lastCompassUpdate;
 }
@@ -358,7 +359,7 @@ void compassUpdate(timeUs_t currentTimeUs)
 {
 #ifdef USE_SIMULATOR
 	if (ARMING_FLAG(SIMULATOR_MODE_HITL)) {
-		lastCompassUpdate = US2MS(currentTimeUs);
+		lastCompassUpdate = currentTimeUs;
 		return;
 	}
 #endif
@@ -471,7 +472,7 @@ void compassUpdate(timeUs_t currentTimeUs)
 
         fpVector3_t rotated;
 
-        rotationMatrixRotateVector(&rotated, &v, &mag.dev.magAlign.externalRotation);
+        rotationMatrixByVector(&rotated, &v, &mag.dev.magAlign.externalRotation);
 
          mag.magADC[X] = rotated.x;
          mag.magADC[Y] = rotated.y;
@@ -483,7 +484,7 @@ void compassUpdate(timeUs_t currentTimeUs)
         applyBoardAlignment(mag.magADC);
     }
 
-    lastCompassUpdate = US2MS(currentTimeUs);
+    lastCompassUpdate = currentTimeUs;
 }
 
 #endif

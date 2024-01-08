@@ -673,7 +673,7 @@ static bool mspFcProcessOutCommand(uint16_t cmdMSP, sbuf_t *dst, mspPostProcessF
         break;
 
     case MSP_LOOP_TIME:
-        sbufWriteU16(dst, gyroConfig()->looptime);
+        sbufWriteU16(dst, (uint16_t)getLooptime());
         break;
 
     case MSP_RC_TUNING:

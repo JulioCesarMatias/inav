@@ -40,6 +40,7 @@ typedef enum {
 
 typedef struct baro_s {
     baroDev_t dev;
+    bool calibrationFinished;
     int32_t BaroAlt;
     int32_t baroTemperature;            // Use temperature for telemetry
     int32_t baroPressure;               // Use pressure for telemetry

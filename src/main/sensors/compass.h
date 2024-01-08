@@ -77,7 +77,7 @@ PG_DECLARE(compassConfig_t, compassConfig);
 bool compassDetect(magDev_t *dev, magSensor_e magHardwareToUse);
 bool compassInit(void);
 void compassUpdate(timeUs_t currentTimeUs);
-timeMs_t compassLastUpdate(void);
+timeUs_t compassLastUpdate(void);
 bool compassIsHealthy(void);
 bool compassIsCalibrationComplete(void);
 

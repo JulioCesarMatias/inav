@@ -24,6 +24,7 @@
 
 #include "common/maths.h"
 #include "common/vector.h"
+#include "common/matrix.h"
 #include "common/axis.h"
 
 #include "config/parameter_group.h"
@@ -67,7 +68,7 @@ void initBoardAlignment(void)
         rotationAngles.angles.pitch = DECIDEGREES_TO_RADIANS(boardAlignment()->pitchDeciDegrees);
         rotationAngles.angles.yaw   = DECIDEGREES_TO_RADIANS(boardAlignment()->yawDeciDegrees  );
 
-        rotationMatrixFromAngles(&boardRotMatrix, &rotationAngles);
+        matrixFromEuler(&boardRotMatrix, rotationAngles.angles.roll, rotationAngles.angles.pitch, rotationAngles.angles.yaw);
     }
 }
 
@@ -92,7 +93,7 @@ void applyBoardAlignment(float *vec)
     }
 
     fpVector3_t fpVec = { .v = { vec[X], vec[Y], vec[Z] } };
-    rotationMatrixRotateVector(&fpVec, &fpVec, &boardRotMatrix);
+    rotationMatrixByVector(&fpVec, &fpVec, &boardRotMatrix);
 
     vec[X] = lrintf(fpVec.x);
     vec[Y] = lrintf(fpVec.y);

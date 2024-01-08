@@ -2265,7 +2265,7 @@ void blackboxInit(void)
     }
 
     /* FIXME is this really necessary ? Why?  */
-    int max_denom = 4096*1000 / gyroConfig()->looptime;
+    int max_denom = 4096*1000 / (uint16_t)getLooptime();
     if (blackboxConfig()->rate_denom > max_denom) {
         blackboxConfigMutable()->rate_denom = max_denom;
     }

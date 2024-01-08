@@ -872,6 +872,16 @@ Q factor for dynamic notches
 
 ---
 
+### ekf_enabled
+
+Extended Kalman Filter ON/OFF
+
+| Default | Min | Max |
+| --- | --- | --- |
+| ON | OFF | ON |
+
+---
+
 ### esc_sensor_listen_only
 
 Enable when BLHeli32 Auto Telemetry function is used. Disable in every other case
