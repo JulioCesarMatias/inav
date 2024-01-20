@@ -13,6 +13,7 @@
         "ekf.h": "c",
         "locale": "c",
         "pitotmeter.h": "c",
-        "compass.h": "c"
+        "compass.h": "c",
+        "navigation.h": "c"
     }
 }

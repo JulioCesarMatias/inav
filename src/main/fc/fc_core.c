@@ -72,6 +72,7 @@
 
 #include "msp/msp_serial.h"
 
+#include "navigation/ekf.h"
 #include "navigation/navigation.h"
 
 #include "rx/rx.h"
@@ -878,8 +879,6 @@ static void applyThrottleTiltCompensation(void)
         }
     }
 }
-
-#include "navigation/ekf.h"
 
 void taskMainPidLoop(timeUs_t currentTimeUs)
 {

@@ -206,7 +206,7 @@ void taskUpdatePitot(timeUs_t currentTimeUs)
 
     pitotUpdate();
 
-    if ( pitotIsHealthy()) {
+    if (pitotIsHealthy()) {
         updatePositionEstimator_PitotTopic(currentTimeUs);
     }
 }
@@ -499,7 +499,7 @@ cfTask_t cfTasks[TASK_COUNT] = {
     [TASK_BARO] = {
         .taskName = "BARO",
         .taskFunc = taskUpdateBaro,
-        .desiredPeriod = TASK_PERIOD_HZ(10),      // Barometer is updated at 10 Hz
+        .desiredPeriod = TASK_PERIOD_HZ(20),      // Barometer is updated at 20 Hz
         .staticPriority = TASK_PRIORITY_MEDIUM,
     },
 #endif

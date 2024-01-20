@@ -128,12 +128,13 @@ typedef struct gpsSolutionData_s {
         bool validVelD;
         bool validEPE;      // EPH/EPV values are valid - actual accuracy
         bool validTime;
+        bool have_vertical_velocity; // does GPS give vertical velocity? Set to true only once available.
     } flags;
 
     gpsFixType_e fixType;
     uint8_t numSat;
 
-    float speed_accuracy;
+    float speed_accuracy; // 3D velocity RMS accuracy estimate in m/s
 
     gpsLocation_t llh;
     int16_t       velNED[3];

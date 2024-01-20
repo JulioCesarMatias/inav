@@ -95,11 +95,6 @@ typedef struct
     bool bad_sideslip : 1;
 } fault_status_t;
 
-PG_REGISTER_WITH_RESET_TEMPLATE(ekfConfig_t, ekfConfig, PG_EKF_CONFIG, 0);
-
-PG_RESET_TEMPLATE(ekfConfig_t, ekfConfig,
-                  .ekfEnabled = SETTING_EKF_ENABLED_DEFAULT, );
-
 state_elements_t storedStates[50];     // state vectors stored for the last 50 time steps
 state_elements_t statesAtVelTime;      // states at the effective time of velNED measurements
 state_elements_t statesAtPosTime;      // states at the effective time of posNE measurements
@@ -259,6 +254,11 @@ timeMs_t BETAmsecPrev;                // time stamp of last synthetic sideslip f
 timeUs_t lastMagUpdate_us;   // last time compass was updated
 timeUs_t lastHgtMeasTime_us; // time of last height measurement used to determine if new data has arrived
 
+PG_REGISTER_WITH_RESET_TEMPLATE(ekfConfig_t, ekfConfig, PG_EKF_CONFIG, 0);
+
+PG_RESET_TEMPLATE(ekfConfig_t, ekfConfig,
+                  .ekfEnabled = SETTING_EKF_ENABLED_DEFAULT, );
+                  
 // Forces EKF to disable if the following settings are enabled. The reason for this procedure is because this EKF still does not fuse these sensors.
 bool forceEKFDisable(void)
 {
@@ -607,7 +607,7 @@ void ekf_readGpsData(void)
 
         // read the NED velocity from the GPS
         velNED.x = CENTIMETERS_TO_METERS(gpsSol.velNED[X]);
-        velNED.y = CENTIMETERS_TO_METERS(gpsSol.velNED[Y]);
+        velNED.y = -CENTIMETERS_TO_METERS(gpsSol.velNED[Y]);
         velNED.z = CENTIMETERS_TO_METERS(gpsSol.velNED[Z]);
 
         // check if we have enough GPS satellites and increase the gps noise scaler if we don't
@@ -755,6 +755,7 @@ void ekf_StoreStatesReset(void)
     // clear stored state history
     memset(&storedStates[0], 0, sizeof(storedStates));
     memset(&statetimeStamp[0], 0, sizeof(statetimeStamp));
+
     // store current state vector in first column
     storeIndex = 0;
     storedStates[storeIndex] = ekfStates.stateStruct;
@@ -1077,24 +1078,36 @@ void ekf_ForceSymmetry(void)
 void ekf_ConstrainVariances(void)
 {
     for (uint8_t i = 0; i <= 3; i++)
+    {
         P[i][i] = constrainf(P[i][i], 0.0f, 1.0f); // quaternions
+    }
 
     for (uint8_t i = 4; i <= 6; i++)
+    {
         P[i][i] = constrainf(P[i][i], 0.0f, 1.0e3f); // velocities
+    }
 
     for (uint8_t i = 7; i <= 9; i++)
+    {
         P[i][i] = constrainf(P[i][i], 0.0f, 1.0e6f); // positions
+    }
 
     for (uint8_t i = 10; i <= 12; i++)
+    {
         P[i][i] = constrainf(P[i][i], 0.0f, sq(0.175f * dtIMU)); // delta angle biases
+    }
 
     P[13][13] = constrainf(P[13][13], 0.0f, sq(10.0f * dtIMU)); // delta velocity bias
 
     for (uint8_t i = 14; i <= 15; i++)
+    {
         P[i][i] = constrainf(P[i][i], 0.0f, 1.0e3f); // earth magnetic field
+    }
 
     for (uint8_t i = 16; i <= 21; i++)
+    {
         P[i][i] = constrainf(P[i][i], 0.0f, 1.0f); // body magnetic field
+    }
 }
 
 // constrain states to prevent ill-conditioning
@@ -1102,22 +1115,30 @@ void ekf_ConstrainStates(void)
 {
     // quaternions are limited between +-1
     for (uint8_t i = 0; i <= 3; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -1.0f, 1.0f);
+    }
 
     // velocity limit 500 m/sec
     for (uint8_t i = 4; i <= 6; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -5.0e2f, 5.0e2f);
+    }
 
     // position limit 1000 km - TODO apply circular limit
     for (uint8_t i = 7; i <= 8; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -1.0e6f, 1.0e6f);
+    }
 
     // height limit covers home alt on everest through to home alt at SL and ballon drop
     ekfStates.statesArray[9] = constrainf(ekfStates.statesArray[9], -4.0e4f, 1.0e4f);
 
     // gyro bias limit ~6 deg/sec (this needs to be set based on manufacturers specs)
     for (uint8_t i = 10; i <= 12; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -0.1f * dtIMU, 0.1f * dtIMU);
+    }
 
     // when the vehicle arms we adjust the limits so that in flight the bias can change by the same amount in either direction
     float delAngBiasLim = EKF_MAX_GYRO_BIAS * dtIMU;
@@ -1131,15 +1152,21 @@ void ekf_ConstrainStates(void)
 
     // wind velocity limit 100 m/s - TODO apply circular limit
     for (uint8_t i = 14; i <= 15; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -100.0f, 100.0f);
+    }
 
     // earth magnetic field limit
     for (uint8_t i = 16; i <= 18; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -1.0f, 1.0f);
+    }
 
     // body magnetic field limit
     for (uint8_t i = 19; i <= 21; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -0.5f, 0.5f);
+    }
 }
 
 // copy covariances across from covariance prediction calculation and fix numerical errors
@@ -1318,6 +1345,7 @@ void ekf_FuseMagnetometer(void)
                               2 * *magN * *q2) +
                   P[0][18] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
              P[0][19] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2));
+
         if (temp >= *R_MAG)
         {
             SK_MX[0] = 1.0f / temp;
@@ -1332,6 +1360,7 @@ void ekf_FuseMagnetometer(void)
             faultStatus.bad_xmag = true;
             return;
         }
+
         SK_MX[1] = SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6];
         SK_MX[2] = 2 * *magD * *q0 - 2 * *magE * *q1 + 2 * *magN * *q2;
         SK_MX[3] = SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2;
@@ -1543,6 +1572,7 @@ void ekf_FuseMagnetometer(void)
                   P[18][17] * (2 * *q0 * *q1 + 2 * *q2 * *q3) -
                   P[3][17] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) -
              P[3][20] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2));
+
         if (temp >= *R_MAG)
         {
             SK_MY[0] = 1.0f / temp;
@@ -1557,6 +1587,7 @@ void ekf_FuseMagnetometer(void)
             faultStatus.bad_ymag = true;
             return;
         }
+
         SK_MY[1] = SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6];
         SK_MY[2] = SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2;
         SK_MY[3] = 2 * *q0 * *q3 - 2 * *q1 * *q2;
@@ -1773,6 +1804,7 @@ void ekf_FuseMagnetometer(void)
                               2 * *magN * *q3) +
                   P[2][17] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2)) +
              P[2][21] * (SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2));
+
         if (temp >= *R_MAG)
         {
             SK_MZ[0] = 1.0f / temp;
@@ -1787,6 +1819,7 @@ void ekf_FuseMagnetometer(void)
             faultStatus.bad_zmag = true;
             return;
         }
+
         SK_MZ[1] = SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6];
         SK_MZ[2] = 2 * *magD * *q1 + 2 * *magE * *q0 - 2 * *magN * *q3;
         SK_MZ[3] = SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2;
@@ -2224,8 +2257,7 @@ void ekf_FuseAirspeed(void)
             // correct the state vector
             for (uint8_t j = 0; j <= 21; j++)
             {
-                ekfStates.statesArray[j] =
-                    ekfStates.statesArray[j] - Kfusion[j] * innovVias;
+                ekfStates.statesArray[j] = ekfStates.statesArray[j] - Kfusion[j] * innovVias;
             }
 
             // normalise the quaternion states
@@ -2249,6 +2281,7 @@ void ekf_FuseAirspeed(void)
                 for (uint8_t j = 16; j <= 21; j++)
                     KH[i][j] = 0.0f;
             }
+
             for (uint8_t i = 0; i <= 21; i++)
             {
                 for (uint8_t j = 0; j <= 21; j++)
@@ -2264,6 +2297,7 @@ void ekf_FuseAirspeed(void)
                     }
                 }
             }
+
             for (uint8_t i = 0; i <= 21; i++)
             {
                 for (uint8_t j = 0; j <= 21; j++)
@@ -2769,6 +2803,7 @@ void ekf_FuseSideslip(void)
             for (uint8_t j = 16; j <= 21; j++)
                 KH[i][j] = 0.0f;
         }
+
         for (uint8_t i = 0; i <= 21; i++)
         {
             for (uint8_t j = 0; j <= 21; j++)
@@ -2784,6 +2819,7 @@ void ekf_FuseSideslip(void)
                 }
             }
         }
+
         for (uint8_t i = 0; i <= 21; i++)
         {
             for (uint8_t j = 0; j <= 21; j++)
@@ -4793,8 +4829,6 @@ void ekf_FuseVelPosNED(void)
     fpVector3_t velInnov;
     fpVector3_t velInnov1;
     fpVector3_t velInnov2;
-    fpVector2_t posInnov;
-    float hgtInnov = 0.0f;
 
     // declare variables used to control access to arrays
     bool fuseData[6] = {false, false, false, false, false, false};
@@ -4885,21 +4919,25 @@ void ekf_FuseVelPosNED(void)
         if (fusePosData)
         {
             // test horizontal position measurements
-            posInnov.v[X] = statesAtPosTime.position.x - observation[3];
-            posInnov.v[Y] = statesAtPosTime.position.y - observation[4];
+            innovVelPos[3] = statesAtPosTime.position.x - observation[3];
+            innovVelPos[4] = statesAtPosTime.position.y - observation[4];
             varInnovVelPos[3] = P[7][7] + R_OBS[3];
             varInnovVelPos[4] = P[8][8] + R_OBS[4];
+
             // apply an innovation consistency threshold test, but don't fail if
             // bad IMU data calculate max valid position innovation squared
             // based on a maximum horizontal inertial nav accel error and GPS
             // noise parameter max inertial nav error is scaled with horizontal
             // g to allow for increased errors when manoeuvring
             float accelScale = (1.0f + 0.1f * accNavMag);
-            float maxPosInnov2 = sq(ekfParam.gpsPosInnovGate * ekfParam.gpsHorizPosNoise + 0.005f * accelScale * ekfParam.gpsGlitchAccelMax * sq((float)MS2S(imuSampleTime_ms - lastPosPassTime_ms)));
-            posTestRatio = (sq(posInnov.v[X]) + sq(posInnov.v[Y])) / maxPosInnov2;
+            float maxPosInnov2 = sq(ekfParam.gpsPosInnovGate * ekfParam.gpsHorizPosNoise) + sq(0.005f * accelScale * ekfParam.gpsGlitchAccelMax) * sq((float)MS2S(imuSampleTime_ms - lastPosPassTime_ms));
+            posTestRatio = (sq(innovVelPos[3]) + sq(innovVelPos[4])) / maxPosInnov2;
+
             posHealth = ((posTestRatio < 1.0f) || badIMUdata);
+
             // declare a timeout condition if we have been too long without data
             posTimeout = ((imuSampleTime_ms - lastPosPassTime_ms) > gpsRetryTime);
+
             // use position data if healthy, timed out, or in vehicle disarmed
             if (posHealth || posTimeout || !vehicleArmed)
             {
@@ -4914,6 +4952,8 @@ void ekf_FuseVelPosNED(void)
                     ekf_ResetVelocity();
                     // don't fuse data on this time step
                     fusePosData = false;
+                    // Reset the normalised innovation to avoid false failing the bad position fusion test
+                    posTestRatio = 0.0f;
                 }
             }
             else
@@ -4927,10 +4967,10 @@ void ekf_FuseVelPosNED(void)
         {
             // test velocity measurements
             uint8_t imax = 2;
-            float K1 = 0;            // innovation to error ratio for IMU1
-            float K2 = 0;            // innovation to error ratio for IMU2
-            float innovVelSumSq = 0; // sum of squares of velocity innovations
-            float varVelSum = 0;     // sum of velocity innovation variances
+            float K1 = 0.0f;            // innovation to error ratio for IMU1
+            float K2 = 0.0f;            // innovation to error ratio for IMU2
+            float innovVelSumSq = 0.0f; // sum of squares of velocity innovations
+            float varVelSum = 0.0f;     // sum of velocity innovation variances
             for (uint8_t i = 0; i <= imax; i++)
             {
                 // velocity states start at index 4
@@ -4998,7 +5038,6 @@ void ekf_FuseVelPosNED(void)
                 // if data is not healthy and timed out and position is
                 // unhealthy we reset the velocity, but do not fuse data on this time step
                 ekf_ResetVelocity();
-                ekf_StoreStatesReset();
                 fuseVelData = false;
             }
             else
@@ -5012,13 +5051,19 @@ void ekf_FuseVelPosNED(void)
         if (fuseHgtData)
         {
             // calculate height innovations
-            hgtInnov = statesAtHgtTime.position.z - observation[5];
+            innovVelPos[5] = statesAtHgtTime.position.z - observation[5];
+
+            // calculate the innovation variance
             varInnovVelPos[5] = P[9][9] + R_OBS[5];
+
             // calculate the innovation consistency test ratio
-            hgtTestRatio = sq(hgtInnov) / (sq(ekfParam.hgtInnovGate) * varInnovVelPos[5]);
+            hgtTestRatio = sq(innovVelPos[5]) / (sq(ekfParam.hgtInnovGate) * varInnovVelPos[5]);
+
             // fail if the ratio is > 1, but don't fail if bad IMU data
             hgtHealth = ((hgtTestRatio < 1.0f) || badIMUdata);
+
             hgtTimeout = (imuSampleTime_ms - lastHgtPassTime_ms) > hgtRetryTime_ms;
+
             // fuse height data if healthy
             // force a reset if timed out to prevent the possibility of inertial errors causing persistent loss of height reference
             // force fusion in constant position mode on the ground to allow large accelerometer biases to be learned without rejecting barometer
@@ -5286,8 +5331,7 @@ void ekf_SelectVelPosFusion(void)
     {
         // reset data arrived flag
         newDataHgt = false;
-        // reset state updates and counter used to spread fusion updates across
-        // several frames to reduce 10Hz pulsing
+        // reset state updates and counter used to spread fusion updates across several frames to reduce 10Hz pulsing
         memset(&hgtIncrStateDelta[0], 0, sizeof(hgtIncrStateDelta));
         hgtUpdateCount = 0;
         // enable fusion
@@ -5321,7 +5365,8 @@ void ekf_SelectVelPosFusion(void)
             {
                 ekf_ResetPosition();
                 ekf_ResetVelocity();
-                ekf_StoreStatesReset();
+                // Reset the normalised innovation to avoid false failing the bad position fusion test
+                posTestRatio = 0.0f;
             }
         }
         else
@@ -5748,6 +5793,8 @@ void ekf_UpdateFilter(void)
         return;
     }
 
+    TIME_SECTION_BEGIN(0);
+
     // read IMU data and convert to delta angles and velocities
     ekf_readIMUData();
 
@@ -5832,6 +5879,8 @@ void ekf_UpdateFilter(void)
     ekf_SelectMagFusion();
     ekf_SelectIASFusion();
     ekf_SelectBetaFusion();
+
+    TIME_SECTION_END(0);
 }
 
 // return the quaternions defining the rotation from NED to XYZ (body) axes
@@ -5856,7 +5905,7 @@ void ekf_getEulerAngles(fpVector3_t *euler)
 // return the individual Z-accel bias estimates in m/s^2
 void ekf_getAccelZBias(float *zbias1, float *zbias2)
 {
-    if (dtIMU > 0)
+    if (dtIMU > 0.0f)
     {
         *zbias1 = ekfStates.stateStruct.accel_zbias1 / dtIMU;
         *zbias2 = ekfStates.stateStruct.accel_zbias2 / dtIMU;
@@ -5909,16 +5958,15 @@ void ekf_getPosNEU(fpVector3_t *pos)
 void ekf_getVelNEU(fpVector3_t *vel)
 {
     vel->x = METERS_TO_CENTIMETERS(ekfStates.stateStruct.velocity.x);
-    vel->y = METERS_TO_CENTIMETERS(ekfStates.stateStruct.velocity.y);
+    vel->y = METERS_TO_CENTIMETERS(-ekfStates.stateStruct.velocity.y);
     vel->z = METERS_TO_CENTIMETERS(ekfStates.stateStruct.velocity.z);
 }
 
 // return the NED wind speed estimates in cm/s (positive is air moving in the direction of the axis)
-void ekf_getWind(fpVector3_t *wind)
+void ekf_getWind(fpVector2_t *wind)
 {
     wind->x = METERS_TO_CENTIMETERS(ekfStates.stateStruct.wind_vel.x);
     wind->y = METERS_TO_CENTIMETERS(ekfStates.stateStruct.wind_vel.y);
-    wind->z = 0.0f; // currently don't estimate this
 }
 
 void ekf_Update(float deltaTime)
@@ -5948,7 +5996,7 @@ void ekf_Update(float deltaTime)
         {
             fpVector3_t ekf_eulers;
             fpVector3_t ekf_gyro_bias;
-            fpVector3_t ekf_wind_speed;
+            fpVector2_t ekf_wind_speed;
 
             // ekf_getRotationBodyToNED(&ahrsMatrix);
             ekf_getEulerAngles(&ekf_eulers);
@@ -5983,25 +6031,15 @@ void ekf_Update(float deltaTime)
 
             // float ekfGroundSpeed = calc_length_pythagorean_2D(ekf_wind_speed.x, ekf_wind_speed.y);
 
-            /*DEBUG_SET(DEBUG_EKF, 0, velVar * 100.0f);
-            DEBUG_SET(DEBUG_EKF, 1, posVar * 100.0f);
-            DEBUG_SET(DEBUG_EKF, 2, hgtVar * 100.0f);
-            DEBUG_SET(DEBUG_EKF, 3, magVar * 100.0f);
-            DEBUG_SET(DEBUG_EKF, 4, tasVar * 100.0f);*/
-
-            DEBUG_SET(DEBUG_EKF, 0, ekfPosVel.pos.x);
-            DEBUG_SET(DEBUG_EKF, 1, ekfPosVel.pos.y);
-            DEBUG_SET(DEBUG_EKF, 2, ekfPosVel.pos.z);
-            DEBUG_SET(DEBUG_EKF, 3, ekfPosVel.vel.x);
-            DEBUG_SET(DEBUG_EKF, 4, ekfPosVel.vel.y);
-            DEBUG_SET(DEBUG_EKF, 5, ekfPosVel.vel.z);
-            DEBUG_SET(DEBUG_EKF, 6, ekf_eulers_z / 10);
-            DEBUG_SET(DEBUG_EKF, 7, magVar * 100.0f);
+            DEBUG_SET(DEBUG_EKF, 1, velVar * 100.0f);
+            DEBUG_SET(DEBUG_EKF, 2, posVar * 100.0f);
+            DEBUG_SET(DEBUG_EKF, 3, hgtVar * 100.0f);
+            DEBUG_SET(DEBUG_EKF, 4, magVar * 100.0f);
+            DEBUG_SET(DEBUG_EKF, 5, tasVar * 100.0f);
 
             /*DEBUG_SET(DEBUG_EKF, 0, ekf_gyro_bias.x);
             DEBUG_SET(DEBUG_EKF, 1, ekf_gyro_bias.y);
-            DEBUG_SET(DEBUG_EKF, 2, ekf_gyro_bias.z);
-            DEBUG_SET(DEBUG_EKF, 3, ekfPosVel.pos.z);*/
+            DEBUG_SET(DEBUG_EKF, 2, ekf_gyro_bias.z);*/
 
             // gyro.gyroADCf[X] -= RADIANS_TO_DEGREES(ekf_gyro_bias.x);
             // gyro.gyroADCf[Y] -= RADIANS_TO_DEGREES(ekf_gyro_bias.y);

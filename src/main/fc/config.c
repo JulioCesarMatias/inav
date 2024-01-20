@@ -185,6 +185,7 @@ __attribute__((weak)) void targetConfiguration(void)
 uint32_t getLooptime(void)
 {
     uint16_t newLooptime;
+    
     if (ekf_getLoopTime(&newLooptime))
     {
         return newLooptime;

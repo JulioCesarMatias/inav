@@ -21,29 +21,37 @@
 
 typedef float Matrix22[22][22];
 
-static inline void zeroMatrix(fpMatrix3_t *matrix) {
+static inline void zeroMatrix(fpMatrix3_t *matrix) 
+{
+    // A
     matrix->m[0][0] = 0.0f;
     matrix->m[0][1] = 0.0f;
     matrix->m[0][2] = 0.0f;
 
+    // B
     matrix->m[1][0] = 0.0f;
     matrix->m[1][1] = 0.0f;
     matrix->m[1][2] = 0.0f;
-
+    
+    // C
     matrix->m[2][0] = 0.0f;
     matrix->m[2][1] = 0.0f;
     matrix->m[2][2] = 0.0f;
 }
 
-static inline void identityMatrix(fpMatrix3_t *matrix) {
+static inline void identityMatrix(fpMatrix3_t *matrix) 
+{
+    // A
     matrix->m[0][0] = 1.0f;
     matrix->m[0][1] = 0.0f;
     matrix->m[0][2] = 0.0f;
 
+    // B
     matrix->m[1][0] = 0.0f;
     matrix->m[1][1] = 1.0f;
     matrix->m[1][2] = 0.0f;
 
+    // C
     matrix->m[2][0] = 0.0f;
     matrix->m[2][1] = 0.0f;
     matrix->m[2][2] = 1.0f;
