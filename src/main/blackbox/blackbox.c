@@ -351,7 +351,7 @@ static const blackboxDeltaFieldDefinition_t blackboxMainFields[] = {
     {"servo",       13, UNSIGNED, .Ipredict = PREDICT(1500),    .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),      .Pencode = ENCODING(SIGNED_VB), CONDITION(SERVOS)},
     {"servo",       14, UNSIGNED, .Ipredict = PREDICT(1500),    .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),      .Pencode = ENCODING(SIGNED_VB), CONDITION(SERVOS)},
     {"servo",       15, UNSIGNED, .Ipredict = PREDICT(1500),    .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),      .Pencode = ENCODING(SIGNED_VB), CONDITION(SERVOS)},
-
+    
     {"navState",  -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), CONDITION(ALWAYS)},
     {"navFlags",  -1, UNSIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), CONDITION(ALWAYS)},
     {"navEPH",    -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
@@ -373,22 +373,22 @@ static const blackboxDeltaFieldDefinition_t blackboxMainFields[] = {
     {"navAcc",     0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_ACC},
     {"navAcc",     1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_ACC},
     {"navAcc",     2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_ACC},
-    {"ekfHealthy",         -1, UNSIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), CONDITION(ALWAYS)},
-    {"ekfAttittudeRoll",   -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
-    {"ekfAttitudePitch",   -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
-    {"ekfAttitudeYaw",     -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
-    {"ekfGyroBiasX",       -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
-    {"ekfGyroBiasY",       -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
-    {"ekfGyroBiasZ",       -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
-    {"ekfNavPosX",         -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfNavPosY",         -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfNavPosZ",         -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfNavVelX",         -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfNavVelY",         -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfNavVelZ",         -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfGroundSpeed",     -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfWindX",           -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfWindY",           -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+
+    {"ekfAttitude",   0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
+    {"ekfAttitude",   1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
+    {"ekfAttitude",   2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
+    {"ekfGyroBias",   0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
+    {"ekfGyroBias",   1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
+    {"ekfGyroBias",   2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
+    {"ekfNavPos",     0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfNavPos",     1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfNavPos",     2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfNavVel",     0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfNavVel",     1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfNavVel",     2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfGroundSpeed", -1, SIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfWind",        0, SIGNED,  .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfWind",        1, SIGNED,  .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
 };
 
 #ifdef USE_GPS
@@ -540,22 +540,12 @@ typedef struct blackboxMainState_s {
     int16_t navHeading;
     uint16_t navTargetHeading;
     int16_t navSurface;
-    uint8_t ekfHealthy;
-    int16_t ekfAttittudeRoll;
-    int16_t ekfAttittudePitch;
-    int16_t ekfAttittudeYaw;
-    int16_t ekfGyroBiasX;
-    int16_t ekfGyroBiasY;
-    int16_t ekfGyroBiasZ;
-    int32_t ekfNavPosX;
-    int32_t ekfNavPosY;
-    int32_t ekfNavPosZ;
-    int16_t ekfNavVelX;
-    int16_t ekfNavVelY;
-    int16_t ekfNavVelZ;
+    int16_t ekfAttitude[XYZ_AXIS_COUNT];
+    int16_t ekfGyroBias[XYZ_AXIS_COUNT];
+    int32_t ekfNavPos[XYZ_AXIS_COUNT];
+    int16_t ekfNavVel[XYZ_AXIS_COUNT];
     int16_t ekfGroundSpeed;
-    int16_t ekfWindX;
-    int16_t ekfWindY;
+    int16_t ekfWind[2];
 } blackboxMainState_t;
 
 typedef struct blackboxGpsState_s {
@@ -1019,27 +1009,21 @@ static void writeIntraframe(void)
         }
     }
 
-    blackboxWriteSignedVB(blackboxCurrent->ekfHealthy);
-
     if (testBlackboxCondition(FLIGHT_LOG_FIELD_CONDITION_ATTITUDE)) {
-        blackboxWriteSignedVB(blackboxCurrent->ekfAttittudeRoll);
-        blackboxWriteSignedVB(blackboxCurrent->ekfAttittudePitch);
-        blackboxWriteSignedVB(blackboxCurrent->ekfAttittudeYaw);
-        blackboxWriteSignedVB(blackboxCurrent->ekfGyroBiasX);
-        blackboxWriteSignedVB(blackboxCurrent->ekfGyroBiasY);
-        blackboxWriteSignedVB(blackboxCurrent->ekfGyroBiasZ);
+        blackboxWriteSigned16VBArray(blackboxCurrent->ekfAttitude, XYZ_AXIS_COUNT);
+        blackboxWriteSigned16VBArray(blackboxCurrent->ekfGyroBias, XYZ_AXIS_COUNT);
     }
 
     if (testBlackboxCondition(FLIGHT_LOG_FIELD_CONDITION_NAV_POS)) {
-        blackboxWriteSignedVB(blackboxCurrent->ekfNavPosX);
-        blackboxWriteSignedVB(blackboxCurrent->ekfNavPosY);
-        blackboxWriteSignedVB(blackboxCurrent->ekfNavPosZ);
-        blackboxWriteSignedVB(blackboxCurrent->ekfNavVelX);
-        blackboxWriteSignedVB(blackboxCurrent->ekfNavVelY);
-        blackboxWriteSignedVB(blackboxCurrent->ekfNavVelZ);
+        blackboxWriteSignedVB(blackboxCurrent->ekfNavPos[X]);
+        blackboxWriteSignedVB(blackboxCurrent->ekfNavPos[Y]);
+        blackboxWriteSignedVB(blackboxCurrent->ekfNavPos[Z]);
+        blackboxWriteSignedVB(blackboxCurrent->ekfNavVel[X]);
+        blackboxWriteSignedVB(blackboxCurrent->ekfNavVel[Y]);
+        blackboxWriteSignedVB(blackboxCurrent->ekfNavVel[Z]);
         blackboxWriteSignedVB(blackboxCurrent->ekfGroundSpeed);
-        blackboxWriteSignedVB(blackboxCurrent->ekfWindX);
-        blackboxWriteSignedVB(blackboxCurrent->ekfWindY);
+        blackboxWriteSignedVB(blackboxCurrent->ekfWind[X]);
+        blackboxWriteSignedVB(blackboxCurrent->ekfWind[Y]);
     }
 
     //Rotate our history buffers:
@@ -1299,27 +1283,21 @@ static void writeInterframe(void)
         }
     }
 
-    blackboxWriteSignedVB(blackboxCurrent->ekfHealthy - blackboxLast->ekfHealthy);
-
     if (testBlackboxCondition(FLIGHT_LOG_FIELD_CONDITION_ATTITUDE)) {
-        blackboxWriteSignedVB(blackboxCurrent->ekfAttittudeRoll - blackboxLast->ekfAttittudeRoll);
-        blackboxWriteSignedVB(blackboxCurrent->ekfAttittudePitch - blackboxLast->ekfAttittudePitch);
-        blackboxWriteSignedVB(blackboxCurrent->ekfAttittudeYaw - blackboxLast->ekfAttittudeYaw);
-        blackboxWriteSignedVB(blackboxCurrent->ekfGyroBiasX - blackboxLast->ekfGyroBiasX);
-        blackboxWriteSignedVB(blackboxCurrent->ekfGyroBiasY - blackboxLast->ekfGyroBiasY);
-        blackboxWriteSignedVB(blackboxCurrent->ekfGyroBiasZ - blackboxLast->ekfGyroBiasZ);
+        blackboxWriteArrayUsingAveragePredictor16(offsetof(blackboxMainState_t, ekfAttitude), XYZ_AXIS_COUNT);
+        blackboxWriteArrayUsingAveragePredictor16(offsetof(blackboxMainState_t, ekfGyroBias), XYZ_AXIS_COUNT);
     }
 
     if (testBlackboxCondition(FLIGHT_LOG_FIELD_CONDITION_NAV_POS)) {
-        blackboxWriteSignedVB(blackboxCurrent->ekfNavPosX - blackboxLast->ekfNavPosX);
-        blackboxWriteSignedVB(blackboxCurrent->ekfNavPosY - blackboxLast->ekfNavPosY);
-        blackboxWriteSignedVB(blackboxCurrent->ekfNavPosZ - blackboxLast->ekfNavPosZ);
-        blackboxWriteSignedVB(blackboxCurrent->ekfNavVelX - blackboxLast->ekfNavVelX);
-        blackboxWriteSignedVB(blackboxCurrent->ekfNavVelY - blackboxLast->ekfNavVelY);
-        blackboxWriteSignedVB(blackboxCurrent->ekfNavVelZ - blackboxLast->ekfNavVelZ);
+        blackboxWriteSignedVB(blackboxCurrent->ekfNavPos[X] - blackboxLast->ekfNavPos[X]);
+        blackboxWriteSignedVB(blackboxCurrent->ekfNavPos[Y] - blackboxLast->ekfNavPos[Y]);
+        blackboxWriteSignedVB(blackboxCurrent->ekfNavPos[Z] - blackboxLast->ekfNavPos[Z]);
+        blackboxWriteSignedVB(blackboxHistory[0]->ekfNavVel[X] - (blackboxHistory[1]->ekfNavVel[X] + blackboxHistory[2]->ekfNavVel[X]) / 2);
+        blackboxWriteSignedVB(blackboxHistory[0]->ekfNavVel[Y] - (blackboxHistory[1]->ekfNavVel[Y] + blackboxHistory[2]->ekfNavVel[Y]) / 2);
+        blackboxWriteSignedVB(blackboxHistory[0]->ekfNavVel[Z] - (blackboxHistory[1]->ekfNavVel[Z] + blackboxHistory[2]->ekfNavVel[Z]) / 2);
         blackboxWriteSignedVB(blackboxCurrent->ekfGroundSpeed - blackboxLast->ekfGroundSpeed);
-        blackboxWriteSignedVB(blackboxCurrent->ekfWindX - blackboxLast->ekfWindX);
-        blackboxWriteSignedVB(blackboxCurrent->ekfWindY - blackboxLast->ekfWindY);
+        blackboxWriteSignedVB(blackboxCurrent->ekfWind[X] - blackboxLast->ekfWind[X]);
+        blackboxWriteSignedVB(blackboxCurrent->ekfWind[Y] - blackboxLast->ekfWind[Y]);
     }
 
     //Rotate our history buffers
@@ -1715,9 +1693,9 @@ static void loadMainState(timeUs_t currentTimeUs)
         blackboxCurrent->rcCommand[i] = rcCommand[i];
     }
 
-    blackboxCurrent->attitude[0] = attitude.values.roll;
-    blackboxCurrent->attitude[1] = attitude.values.pitch;
-    blackboxCurrent->attitude[2] = attitude.values.yaw;
+    blackboxCurrent->attitude[X] = attitude.values.roll;
+    blackboxCurrent->attitude[Y] = attitude.values.pitch;
+    blackboxCurrent->attitude[Z] = attitude.values.yaw;
 
     for (int i = 0; i < DEBUG32_VALUE_COUNT; i++) {
         blackboxCurrent->debug[i] = debug[i];
@@ -1763,7 +1741,7 @@ static void loadMainState(timeUs_t currentTimeUs)
     }
     blackboxCurrent->navTargetHeading = navDesiredHeading;
     blackboxCurrent->navSurface = navActualSurface;
-
+    
     fpVector3_t ekfEulerAngles;
     fpVector3_t ekfGyroBias;
     fpVector3_t ekfPos;
@@ -1781,23 +1759,22 @@ static void loadMainState(timeUs_t currentTimeUs)
     if (ekfHeading < 0) {
         ekfHeading += 3600;
     }
-
-    blackboxCurrent->ekfHealthy = ekf_HealthyToUse();
-    blackboxCurrent->ekfAttittudeRoll = RADIANS_TO_DECIDEGREES(ekfEulerAngles.x);
-    blackboxCurrent->ekfAttittudePitch = RADIANS_TO_DECIDEGREES(ekfEulerAngles.y);
-    blackboxCurrent->ekfAttittudeYaw = ekfHeading;
-    blackboxCurrent->ekfGyroBiasX = RADIANS_TO_DEGREES(ekfGyroBias.x);
-    blackboxCurrent->ekfGyroBiasY = RADIANS_TO_DEGREES(ekfGyroBias.y);
-    blackboxCurrent->ekfGyroBiasZ = RADIANS_TO_DEGREES(ekfGyroBias.z);
-    blackboxCurrent->ekfNavPosX = ekfPos.x;
-    blackboxCurrent->ekfNavPosY = ekfPos.y;
-    blackboxCurrent->ekfNavPosZ = CENTIMETERS_TO_METERS(ekfPos.z);
-    blackboxCurrent->ekfNavVelX = CENTIMETERS_TO_METERS(ekfVel.x);
-    blackboxCurrent->ekfNavVelY = CENTIMETERS_TO_METERS(ekfVel.y);
-    blackboxCurrent->ekfNavVelZ = CENTIMETERS_TO_METERS(ekfVel.z);
+    
+    blackboxCurrent->ekfAttitude[X] = RADIANS_TO_DECIDEGREES(ekfEulerAngles.x);
+    blackboxCurrent->ekfAttitude[Y] = RADIANS_TO_DECIDEGREES(ekfEulerAngles.y);
+    blackboxCurrent->ekfAttitude[Z] = ekfHeading;
+    blackboxCurrent->ekfGyroBias[X] = RADIANS_TO_DEGREES(ekfGyroBias.x);
+    blackboxCurrent->ekfGyroBias[Y] = RADIANS_TO_DEGREES(ekfGyroBias.y);
+    blackboxCurrent->ekfGyroBias[Z] = RADIANS_TO_DEGREES(ekfGyroBias.z);
+    blackboxCurrent->ekfNavPos[X] = ekfPos.x;
+    blackboxCurrent->ekfNavPos[Y] = ekfPos.y;
+    blackboxCurrent->ekfNavPos[Z] = CENTIMETERS_TO_METERS(ekfPos.z);
+    blackboxCurrent->ekfNavVel[X] = CENTIMETERS_TO_METERS(ekfVel.x);
+    blackboxCurrent->ekfNavVel[Y] = CENTIMETERS_TO_METERS(ekfVel.y);
+    blackboxCurrent->ekfNavVel[Z] = CENTIMETERS_TO_METERS(ekfVel.z);
     blackboxCurrent->ekfGroundSpeed = CENTIMETERS_TO_METERS(calc_length_pythagorean_2D(ekfVel.x, ekfVel.y));
-    blackboxCurrent->ekfWindX = CENTIMETERS_TO_METERS(ekfWind.x);
-    blackboxCurrent->ekfWindY = CENTIMETERS_TO_METERS(ekfWind.y);
+    blackboxCurrent->ekfWind[X] = CENTIMETERS_TO_METERS(ekfWind.x);
+    blackboxCurrent->ekfWind[Y] = CENTIMETERS_TO_METERS(ekfWind.y);
 }
 
 /**
@@ -2388,7 +2365,7 @@ void blackboxInit(void)
     }
     else {
         // Use next higher power of two via GCC builtin
-        blackboxIFrameInterval = 1 << (32 - __builtin_clz (blackboxConfig()->rate_denom - 1));
+        blackboxIFrameInterval = 1 << (32 - __builtin_clz(blackboxConfig()->rate_denom - 1));
     }
 }
 #endif

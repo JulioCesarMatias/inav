@@ -607,7 +607,7 @@ void ekf_readGpsData(void)
 
         // read the NED velocity from the GPS
         velNED.x = CENTIMETERS_TO_METERS(gpsSol.velNED[X]);
-        velNED.y = -CENTIMETERS_TO_METERS(gpsSol.velNED[Y]);
+        velNED.y = CENTIMETERS_TO_METERS(gpsSol.velNED[Y]);
         velNED.z = CENTIMETERS_TO_METERS(gpsSol.velNED[Z]);
 
         // check if we have enough GPS satellites and increase the gps noise scaler if we don't
@@ -5774,10 +5774,13 @@ void ekf_OnGroundCheck(void)
     inhibitWindStates = ((!ekf_useAirspeed() && !STATE(FIXED_WING_LEGACY)) || onGround);
 
     // request mag calibration for both in-air and manoeuvre threshold options
-    bool magCalRequested = (STATE(FIXED_WING_LEGACY) && !onGround) || (!STATE(FIXED_WING_LEGACY) && manoeuvring);
+    bool magCalRequested = (STATE(FIXED_WING_LEGACY) && !onGround) || (STATE(ROVER) && manoeuvring) || STATE(MULTIROTOR) || STATE(BOAT);
+
+    // deny mag calibration request if we aren't using the compass
+    bool magCalDenied = !ekf_useCompass();
 
     // inhibit the magnetic field calibration if not requested or denied
-    inhibitMagStates = (!magCalRequested || !ekf_useCompass());
+    inhibitMagStates = (!magCalRequested || magCalDenied);
 }
 
 // Update Filter States - this should be called whenever new IMU data is available
@@ -5976,8 +5979,7 @@ void ekf_Update(float deltaTime)
         return;
     }
 
-    // LPF to filter the spike
-    dtIMU = 0.98f * dtIMU + 0.02f * deltaTime;
+    dtIMU = deltaTime;
 
     if (!ekf_started)
     {
