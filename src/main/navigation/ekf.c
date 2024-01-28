@@ -421,7 +421,7 @@ bool ekf_healthy(void)
         return false;
     }
 
-    if (velTestRatio > 1 && posTestRatio > 1 && hgtTestRatio > 1)
+    if (velTestRatio > 1.0f && posTestRatio > 1.0f && hgtTestRatio > 1.0f)
     {
         // all three metrics being above 1 means the filter is extremely unhealthy.
         return false;
@@ -4887,8 +4887,8 @@ void ekf_FuseVelPosNED(void)
 
         // estimate the GPS Velocity, GPS horiz position and height measurement variances.
         R_OBS[0] = sq(constrainf(ekfParam.gpsHorizVelNoise, 0.05f, 5.0f)) + sq(gpsNEVelVarAccScale * accNavMag);
-        R_OBS[1] = R_OBS[0];
         R_OBS[2] = sq(constrainf(ekfParam.gpsVertVelNoise, 0.05f, 5.0f)) + sq(gpsDVelVarAccScale * accNavMag);
+        R_OBS[1] = R_OBS[0];
         R_OBS[3] = sq(constrainf(ekfParam.gpsHorizPosNoise, 0.1f, 10.0f)) + sq(posErr);
         R_OBS[4] = R_OBS[3];
         R_OBS[5] = sq(constrainf(ekfParam.baroAltNoise, 0.1f, 10.0f));
@@ -4914,8 +4914,7 @@ void ekf_FuseVelPosNED(void)
             }
         }
 
-        // calculate innovations and check GPS data validity using an innovation
-        // consistency check test position measurements
+        // calculate innovations and check GPS data validity using an innovation consistency check test position measurements
         if (fusePosData)
         {
             // test horizontal position measurements
@@ -5567,8 +5566,7 @@ void ekf_UpdateStrapdownEquationsNED(void)
     velDotNEDfilt.y = velDotNED.y * 0.05f + velDotNEDfilt.y * 0.95f;
     velDotNEDfilt.z = velDotNED.z * 0.05f + velDotNEDfilt.z * 0.95f;
 
-    // calculate a magnitude of the filtered nav acceleration (required for GPS
-    // variance estimation)
+    // calculate a magnitude of the filtered nav acceleration (required for GPS variance estimation)
     accNavMag = calc_length_pythagorean_3D(velDotNEDfilt.x, velDotNEDfilt.y, velDotNEDfilt.z);
     accNavMagHoriz = calc_length_pythagorean_2D(velDotNEDfilt.x, velDotNEDfilt.y);
 
