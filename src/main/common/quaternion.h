@@ -245,7 +245,7 @@ static inline void quaternionToEuler(fpQuaternion_t q, float *roll, float *pitch
     *yaw = atan2_approx(2.0f * (q.q0 * q.q3 + q.q1 * q.q2), 1.0f - 2.0f * (q.q2 * q.q2 + q.q3 * q.q3));
 }
 
-static inline void QuaternionFromAxisAngle(fpVector3_t v, fpQuaternion_t *q) {
+static inline void quaternionFromAxisAngle(fpVector3_t v, fpQuaternion_t *q) {
     float theta = fast_fsqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
 
     if (theta < 1.0e-12f) {

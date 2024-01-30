@@ -199,6 +199,7 @@ uint8_t hgtUpdateCountMax;  // limit on the number of minor state corrections us
 uint8_t storeIndex;         // state vector storage index
 
 float dt;                          // time lapsed since the last covariance prediction (sec)
+float dtIMUavg;                    // expected time between IMU measurements (sec)
 float dtIMU;                       // time lapsed since the last IMU measurement (sec)
 float accNavMag;                   // magnitude of navigation accel - used to adjust GPS obs variance (m/s^2)
 float accNavMagHoriz;              // magnitude of navigation accel in horizontal plane (m/s^2)
@@ -843,7 +844,8 @@ void ekf_InitialiseVariables(void)
     highYawRate = false;
 
     storeIndex = 0;
-    dtIMU = 0.0f;
+    dtIMU = 0.0025f;
+    dtIMUavg = 0.0025f;
     dt = 0.0f;
     hgtMeas = 0.0f;
     yawRateFilt = 0.0f;
@@ -904,12 +906,12 @@ void ekf_CovarianceInit(void)
     P[9][9] = sq(ekfParam.baroAltNoise);
 
     // delta angle biases
-    P[10][10] = sq(DEGREES_TO_RADIANS(INIT_GYRO_BIAS_UNCERTAINTY * dtIMU));
+    P[10][10] = sq(DEGREES_TO_RADIANS(INIT_GYRO_BIAS_UNCERTAINTY * dtIMUavg));
     P[11][11] = P[10][10];
     P[12][12] = P[10][10];
 
     // Z delta velocity bias
-    P[13][13] = sq(ekfParam.accBiasUncertainty * dtIMU);
+    P[13][13] = sq(ekfParam.accBiasUncertainty * dtIMUavg);
 
     // wind velocities
     P[14][14] = 0.0f;
@@ -1009,14 +1011,14 @@ bool ekf_InitialiseFilterDynamic(void)
     ekf_InitialiseVariables();
 
     // get initial time deltat between IMU measurements (sec)
-    dtIMU = US2S(getLooptime());
+    dtIMU = dtIMUavg = US2S(getLooptime());
 
     // set number of updates over which gps and baro measurements are applied to the velocity and position states
-    magUpdateCountMaxInv = (dtIMU * 1000.0f) / msecMagAvg;
+    magUpdateCountMaxInv = (dtIMUavg * 1000.0f) / msecMagAvg;
     magUpdateCountMax = (uint8_t)(1.0f / magUpdateCountMaxInv);
-    hgtUpdateCountMaxInv = (dtIMU * 1000.0f) / msecHgtAvg;
+    hgtUpdateCountMaxInv = (dtIMUavg * 1000.0f) / msecHgtAvg;
     hgtUpdateCountMax = (uint8_t)(1.0f / hgtUpdateCountMaxInv);
-    gpsUpdateCountMaxInv = (dtIMU * 1000.0f) / msecGpsAvg;
+    gpsUpdateCountMaxInv = (dtIMUavg * 1000.0f) / msecGpsAvg;
     gpsUpdateCountMax = (uint8_t)(1.0f / gpsUpdateCountMaxInv);
 
     // initialise IMU pre-processing states
@@ -1094,10 +1096,10 @@ void ekf_ConstrainVariances(void)
 
     for (uint8_t i = 10; i <= 12; i++)
     {
-        P[i][i] = constrainf(P[i][i], 0.0f, sq(0.175f * dtIMU)); // delta angle biases
+        P[i][i] = constrainf(P[i][i], 0.0f, sq(0.175f * dtIMUavg)); // delta angle biases
     }
 
-    P[13][13] = constrainf(P[13][13], 0.0f, sq(10.0f * dtIMU)); // delta velocity bias
+    P[13][13] = constrainf(P[13][13], 0.0f, sq(10.0f * dtIMUavg)); // delta velocity bias
 
     for (uint8_t i = 14; i <= 15; i++)
     {
@@ -1137,18 +1139,18 @@ void ekf_ConstrainStates(void)
     // gyro bias limit ~6 deg/sec (this needs to be set based on manufacturers specs)
     for (uint8_t i = 10; i <= 12; i++)
     {
-        ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -0.1f * dtIMU, 0.1f * dtIMU);
+        ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -0.1f * dtIMUavg, 0.1f * dtIMUavg);
     }
 
     // when the vehicle arms we adjust the limits so that in flight the bias can change by the same amount in either direction
-    float delAngBiasLim = EKF_MAX_GYRO_BIAS * dtIMU;
+    float delAngBiasLim = EKF_MAX_GYRO_BIAS * dtIMUavg;
     ekfStates.stateStruct.gyro_bias.x = constrainf(ekfStates.stateStruct.gyro_bias.x, (delAngBiasAtArming.x - delAngBiasLim), (delAngBiasAtArming.x + delAngBiasLim));
     ekfStates.stateStruct.gyro_bias.y = constrainf(ekfStates.stateStruct.gyro_bias.y, (delAngBiasAtArming.y - delAngBiasLim), (delAngBiasAtArming.y + delAngBiasLim));
     ekfStates.stateStruct.gyro_bias.z = constrainf(ekfStates.stateStruct.gyro_bias.z, (delAngBiasAtArming.z - delAngBiasLim), (delAngBiasAtArming.z + delAngBiasLim));
 
     // Z accel bias limit 1.0 m/s^2	(this needs to be finalised from test data)
-    ekfStates.statesArray[13] = constrainf(ekfStates.statesArray[13], -1.0f * dtIMU, 1.0f * dtIMU);
-    ekfStates.statesArray[22] = constrainf(ekfStates.statesArray[22], -1.0f * dtIMU, 1.0f * dtIMU);
+    ekfStates.statesArray[13] = constrainf(ekfStates.statesArray[13], -1.0f * dtIMUavg, 1.0f * dtIMUavg);
+    ekfStates.statesArray[22] = constrainf(ekfStates.statesArray[22], -1.0f * dtIMUavg, 1.0f * dtIMUavg);
 
     // wind velocity limit 100 m/s - TODO apply circular limit
     for (uint8_t i = 14; i <= 15; i++)
@@ -1249,7 +1251,7 @@ void ekf_FuseMagnetometer(void)
         MagPred->v[Z] = DCM->m[2][0] * *magN + DCM->m[2][1] * *magE + DCM->m[2][2] * *magD + *magZbias;
 
         // scale magnetometer observation error with total angular rate
-        *R_MAG = sq(constrainf(ekfParam.magNoise, 0.01f, 0.5f)) + sq(magVarRateScale * calc_length_pythagorean_3D(dAngIMU.x, dAngIMU.y, dAngIMU.z) / dtIMU);
+        *R_MAG = sq(constrainf(ekfParam.magNoise, 0.01f, 0.5f)) + sq(magVarRateScale * calc_length_pythagorean_3D(dAngIMU.x, dAngIMU.y, dAngIMU.z) / dtIMUavg);
 
         // calculate observation jacobians
         SH_MAG[0] = 2 * *magD * *q3 + 2 * *magE * *q2 + 2 * *magN * *q1;
@@ -5224,7 +5226,7 @@ void ekf_FuseVelPosNED(void)
                     if (vehicleArmed)
                     {
                         // Correct single IMU prediction states using height measurement, limiting rate of change of bias to 0.005 m/s3
-                        float correctionLimit = 0.005f * dtIMU * 0.2f;
+                        float correctionLimit = 0.005f * dtIMUavg * 0.2f;
                         ekfStates.stateStruct.accel_zbias1 -= constrainf(Kfusion[13] * hgtInnov1, -correctionLimit, correctionLimit); // IMU1 Z accel bias
                         ekfStates.stateStruct.accel_zbias2 -= constrainf(Kfusion[22] * hgtInnov2, -correctionLimit, correctionLimit); // IMU2 Z accel bias
                     }
@@ -5528,7 +5530,7 @@ void ekf_UpdateStrapdownEquationsNED(void)
     correctedDelAng.z = correctedDelAng.z - earthNED.z * dtIMU;
 
     // convert the rotation vector to its equivalent quaternion
-    QuaternionFromAxisAngle(correctedDelAng, &correctedDelAngQuat);
+    quaternionFromAxisAngle(correctedDelAng, &correctedDelAngQuat);
 
     // update the quaternion states by rotating from the previous attitude through the delta angle rotation quaternion and normalise
     quaternionMultiply(&ekfStates.stateStruct.quat, &ekfStates.stateStruct.quat, &correctedDelAngQuat);
@@ -5798,6 +5800,19 @@ void ekf_UpdateFilter(void)
 
     // read IMU data and convert to delta angles and velocities
     ekf_readIMUData();
+    
+    static bool prev_armed = false;
+    vehicleArmed = ARMING_FLAG(ARMED);
+
+    // the vehicle was previously disarmed and time has slipped
+    // gyro auto-zero has likely just been done - skip this timestep
+    if (!prev_armed && dtIMU > dtIMUavg * 5.0f) {
+        // stop the timer used for load measurement
+        prev_armed = vehicleArmed;
+        goto end;
+    }
+
+    prev_armed = vehicleArmed;
 
     // detect if the filter update has been delayed for too long
     if (dtIMU > 0.2f)
@@ -5809,13 +5824,12 @@ void ekf_UpdateFilter(void)
         ekf_StoreStatesReset();
         // Initialise IMU pre-processing states
         ekf_readIMUData();
-        return;
+        // stop the timer used for load measurement
+        goto end;
     }
 
     // check if on ground
     ekf_OnGroundCheck();
-
-    vehicleArmed = ARMING_FLAG(ARMED);
 
     // check to see if vehicleArmed has changed and reset states
     if (vehicleArmed != prevVehicleArmed)
@@ -5881,6 +5895,7 @@ void ekf_UpdateFilter(void)
     ekf_SelectIASFusion();
     ekf_SelectBetaFusion();
 
+end:
     TIME_SECTION_END(0);
 }
 
@@ -5906,10 +5921,10 @@ void ekf_getEulerAngles(fpVector3_t *euler)
 // return the individual Z-accel bias estimates in m/s^2
 void ekf_getAccelZBias(float *zbias1, float *zbias2)
 {
-    if (dtIMU > 0.0f)
+    if (dtIMUavg > 0.0f)
     {
-        *zbias1 = ekfStates.stateStruct.accel_zbias1 / dtIMU;
-        *zbias2 = ekfStates.stateStruct.accel_zbias2 / dtIMU;
+        *zbias1 = ekfStates.stateStruct.accel_zbias1 / dtIMUavg;
+        *zbias2 = ekfStates.stateStruct.accel_zbias2 / dtIMUavg;
     }
     else
     {
@@ -5936,15 +5951,15 @@ fpVector3_t ekf_getAccelEarthFrameBlended(void)
 // return body axis gyro bias estimates in rad/sec
 void ekf_getGyroBias(fpVector3_t *gyroBias)
 {
-    if (dtIMU < 1e-6f)
+    if (dtIMUavg < 1e-6f)
     {
         vectorZero(gyroBias);
         return;
     }
 
-    gyroBias->x = ekfStates.stateStruct.gyro_bias.x / dtIMU;
-    gyroBias->y = ekfStates.stateStruct.gyro_bias.y / dtIMU;
-    gyroBias->z = ekfStates.stateStruct.gyro_bias.z / dtIMU;
+    gyroBias->x = ekfStates.stateStruct.gyro_bias.x / dtIMUavg;
+    gyroBias->y = ekfStates.stateStruct.gyro_bias.y / dtIMUavg;
+    gyroBias->z = ekfStates.stateStruct.gyro_bias.z / dtIMUavg;
 }
 
 // return NEU position in cm/s
@@ -5970,6 +5985,11 @@ void ekf_getWind(fpVector2_t *wind)
     wind->y = METERS_TO_CENTIMETERS(ekfStates.stateStruct.wind_vel.y);
 }
 
+#include "blackbox/blackbox.h"
+bool bbstart;
+bool bbfinish;
+timeMs_t bbdt;
+
 void ekf_Update(float deltaTime)
 {
     if (forceEKFDisable() || !ekfConfig()->ekfEnabled)
@@ -5994,6 +6014,19 @@ void ekf_Update(float deltaTime)
 
         if (ekf_HealthyToUse())
         {
+
+            if(!bbstart) {
+                blackboxStart();
+                bbstart = true;
+                bbdt = millis();
+            }
+
+            if(!bbfinish) {
+                if (millis() - bbdt > S2MS(40)) {
+                    blackboxFinish();
+                    bbfinish = true;
+                }
+            }
             fpVector3_t ekf_eulers;
             fpVector3_t ekf_gyro_bias;
             fpVector2_t ekf_wind_speed;
@@ -6036,6 +6069,7 @@ void ekf_Update(float deltaTime)
             DEBUG_SET(DEBUG_EKF, 3, hgtVar * 100.0f);
             DEBUG_SET(DEBUG_EKF, 4, magVar * 100.0f);
             DEBUG_SET(DEBUG_EKF, 5, tasVar * 100.0f);
+            DEBUG_SET(DEBUG_EKF, 6, bbfinish);
 
             /*DEBUG_SET(DEBUG_EKF, 0, ekf_gyro_bias.x);
             DEBUG_SET(DEBUG_EKF, 1, ekf_gyro_bias.y);
