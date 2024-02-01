@@ -255,9 +255,9 @@ static inline void quaternionFromAxisAngle(fpVector3_t v, fpQuaternion_t *q) {
     }
 
     vectorNormalize(&v, &v);
-    float st2 = sin_approx(theta / 2.0f);
+    float st2 = sin_approx(theta * 0.5f);
 
-    q->q0 = cos_approx(theta / 2.0f);
+    q->q0 = cos_approx(theta * 0.5f);
     q->q1 = v.x * st2;
     q->q2 = v.y * st2;
     q->q3 = v.z * st2;

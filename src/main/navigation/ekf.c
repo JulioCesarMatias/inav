@@ -6015,18 +6015,19 @@ void ekf_Update(float deltaTime)
         if (ekf_HealthyToUse())
         {
 
-            if(!bbstart) {
+            /*if (!bbstart) {
                 blackboxStart();
                 bbstart = true;
                 bbdt = millis();
             }
 
-            if(!bbfinish) {
-                if (millis() - bbdt > S2MS(40)) {
+            if (!bbfinish) {
+                if (millis() - bbdt > S2MS(30)) {
                     blackboxFinish();
                     bbfinish = true;
                 }
-            }
+            }*/
+
             fpVector3_t ekf_eulers;
             fpVector3_t ekf_gyro_bias;
             fpVector2_t ekf_wind_speed;
