@@ -37,6 +37,8 @@
 #include "drivers/system.h"
 #include "drivers/pwm_output.h"
 
+#include "ekf/ekf.h"
+
 #include "sensors/sensors.h"
 #include "sensors/diagnostics.h"
 #include "sensors/boardalignment.h"
@@ -929,7 +931,8 @@ void taskMainPidLoop(timeUs_t currentTimeUs)
         updateWaypointsAndNavigationMode();
     }
     isRXDataNew = false;
-
+    
+    ekfUpdateFilter();
     updatePositionEstimator();
     applyWaypointNavigationAndAltitudeHold();
 

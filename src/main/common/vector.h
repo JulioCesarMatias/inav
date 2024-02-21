@@ -23,6 +23,13 @@
 #include "common/maths.h"
 
 typedef union {
+    float v[2];
+    struct {
+       float x,y;
+    };
+} fpVector2_t;
+
+typedef union {
     float v[3];
     struct {
        float x,y,z;

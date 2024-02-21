@@ -566,8 +566,10 @@ static bool gpsParseFrameUBLOX(void)
         gpsSolDRV.velNED[X] = _buffer.velned.ned_north;
         gpsSolDRV.velNED[Y] = _buffer.velned.ned_east;
         gpsSolDRV.velNED[Z] = _buffer.velned.ned_down;
+        gpsSolDRV.speed_accuracy = _buffer.velned.speed_accuracy;
         gpsSolDRV.flags.validVelNE = true;
         gpsSolDRV.flags.validVelD = true;
+        gpsSolDRV.flags.validSpeed = true;
         _new_speed = true;
         break;
     case MSG_TIMEUTC:
@@ -595,11 +597,12 @@ static bool gpsParseFrameUBLOX(void)
         gpsSolDRV.velNED[Y]=_buffer.pvt.ned_east / 10;   // to cm/s
         gpsSolDRV.velNED[Z]=_buffer.pvt.ned_down / 10;   // to cm/s
         gpsSolDRV.groundSpeed = _buffer.pvt.speed_2d / 10;    // to cm/s
-        gpsSolDRV.groundCourse = (uint16_t) (_buffer.pvt.heading_2d / 10000);     // Heading 2D deg * 100000 rescaled to deg * 10
+        gpsSolDRV.groundCourse = (uint16_t)(_buffer.pvt.heading_2d / 10000);     // Heading 2D deg * 100000 rescaled to deg * 10
         gpsSolDRV.numSat = _buffer.pvt.satellites;
         gpsSolDRV.eph = gpsConstrainEPE(_buffer.pvt.horizontal_accuracy / 10);
         gpsSolDRV.epv = gpsConstrainEPE(_buffer.pvt.vertical_accuracy / 10);
         gpsSolDRV.hdop = gpsConstrainHDOP(_buffer.pvt.position_DOP);
+        gpsSolDRV.speed_accuracy = _buffer.pvt.speed_accuracy;
         gpsSolDRV.flags.validVelNE = true;
         gpsSolDRV.flags.validVelD = true;
         gpsSolDRV.flags.validEPE = true;

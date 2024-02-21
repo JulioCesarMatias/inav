@@ -74,7 +74,9 @@ typedef struct {
 typedef struct {
     timeUs_t    lastUpdateTime; // Last update time (us)
     pt1Filter_t avgFilter;
-    float       alt;            // Raw barometric altitude (cm)
+    float       rawAlt;         // Barometric altitude without OffSet (cm)
+    float       alt;            // Barometric altitude with OffSet (cm)
+    float       altOffSet;      // Barometric altitude OffSet (cm)
     float       epv;
     float       baroAltRate;    // Baro altitude rate of change (cm/s)
 } navPositionEstimatorBARO_t;

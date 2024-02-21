@@ -265,6 +265,25 @@ main_sources(COMMON_SRC
     drivers/vtx_common.c
     drivers/vtx_common.h
 
+    ekf/ekf.c
+    ekf/ekf.h
+    ekf/ekfAirDataFusion.c
+    ekf/ekfBuffer.c
+    ekf/ekfBuffer.h
+    ekf/ekfControl.c
+    ekf/ekfCore.c
+    ekf/ekfCore.h
+    ekf/EKFGSF_yaw.c
+    ekf/EKFGSF_yaw.h
+    ekf/ekfGyroBias.c
+    ekf/ekfMagFusion.c
+    ekf/ekfMath.h
+    ekf/ekfMeasurements.c
+    ekf/ekfOptFlowFusion.c
+    ekf/ekfOutputs.c
+    ekf/ekfPosVelFusion.c
+    ekf/ekfVehicleStatus.c
+    
     fc/cli.c
     fc/cli.h
     fc/config.c

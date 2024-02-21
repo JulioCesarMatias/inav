@@ -81,6 +81,7 @@ PG_RESET_TEMPLATE(compassConfig_t, compassConfig,
 );
 
 static bool magUpdatedAtLeastOnce = false;
+timeUs_t lastCompassUpdate;
 
 bool compassDetect(magDev_t *dev, magSensor_e magHardwareToUse)
 {
@@ -354,6 +355,11 @@ bool compassIsCalibrationComplete(void)
     }
 }
 
+timeUs_t compassLastUpdate(void)
+{
+    return lastCompassUpdate;
+}
+
 void compassUpdate(timeUs_t currentTimeUs)
 {
 #ifdef USE_SIMULATOR
@@ -484,6 +490,17 @@ void compassUpdate(timeUs_t currentTimeUs)
     }
 
     magUpdatedAtLeastOnce = true;
+    lastCompassUpdate = currentTimeUs;
+}
+
+// Get rotated magnetometer field without off-set
+fpVector3_t getMagField(void)
+{
+    fpVector3_t field = {.v = {mag.magADC[X] * compassConfig()->magGain[X] / 1024 + compassConfig()->magZero.raw[X],
+                               mag.magADC[Y] * compassConfig()->magGain[Y] / 1024 + compassConfig()->magZero.raw[Y],
+                               mag.magADC[Z] * compassConfig()->magGain[Z] / 1024 + compassConfig()->magZero.raw[Z]}};
+
+    return field;
 }
 
 #endif
