@@ -207,7 +207,7 @@ void SelectVelPosFusion(void)
 
     // read GPS data from the sensor and check for new data in the buffer
     readGpsData();
-    gpsDataToFuse = ekf_ring_buffer_recall(&storedGPS, &gpsDataDelayed, imuDataDelayed.time_ms);
+    gpsDataToFuse = ekf_ring_buffer_recall(&storedGPS, GPS_RING_BUFFER, &gpsDataDelayed, imuDataDelayed.time_ms);
 
     // Determine if we need to fuse position and velocity data on this time step
     if (gpsDataToFuse && PV_AidingMode == AID_ABSOLUTE)
@@ -790,7 +790,7 @@ void selectHeightForFusion(void)
     // Read range finder data and check for new data in the buffer
     // This data is used by both height and optical flow fusion processing
     readRangeFinder();
-    rangeDataToFuse = ekf_ring_buffer_recall(&storedRange, &rangeDataDelayed, imuDataDelayed.time_ms);
+    rangeDataToFuse = ekf_ring_buffer_recall(&storedRange, RANGE_RING_BUFFER, &rangeDataDelayed, imuDataDelayed.time_ms);
 
     // correct range data for the body frame position offset relative to the IMU
     // the corrected reading is the reading that would have been taken if the sensor was
@@ -808,7 +808,7 @@ void selectHeightForFusion(void)
 
     // read baro height data from the sensor and check for new data in the buffer
     readBaroData();
-    baroDataToFuse = ekf_ring_buffer_recall(&storedBaro, &baroDataDelayed, imuDataDelayed.time_ms);
+    baroDataToFuse = ekf_ring_buffer_recall(&storedBaro, BARO_RING_BUFFER, &baroDataDelayed, imuDataDelayed.time_ms);
 
     bool rangeFinderDataIsFresh = (imuSampleTime_ms - rngValidMeaTime_ms < 500);
     // select height source

@@ -180,8 +180,8 @@ bool getInnovations(fpVector3_t *velInnov, fpVector3_t *posInnov, fpVector3_t *m
 bool getVariances(float *velVar, float *posVar, float *hgtVar, fpVector3_t *magVar, float *tasVar, fpVector2_t *offset);
 
 // should we use the compass? This is public so it can be used for
-// reporting via ahrs.use_compass()
-bool use_compass(void);
+// reporting via ahrs.ekf_useCompass()
+bool ekf_useCompass(void);
 
 // Set to true if the terrain underneath is stable enough to be used as a height reference
 // in combination with a range finder. Set to false if the terrain underneath the vehicle
@@ -337,15 +337,6 @@ typedef struct
 typedef struct
 {
     uint8_t elsize;
-    void *buffer;
-    uint8_t size;
-    uint8_t oldest;
-    uint8_t count;
-} ekf_ring_buffer;
-
-typedef struct
-{
-    uint8_t elsize;
     imu_elements_t *buffer;
     uint8_t size;
     uint8_t oldest;
@@ -362,6 +353,11 @@ typedef struct
     uint8_t youngest;
     bool filled;
 } ekf_output_buffer;
+
+typedef struct {
+    // measurement timestamp (msec)
+    uint32_t time_ms;
+} EKF_obs_element_t;
 
 typedef struct
 {
@@ -405,13 +401,30 @@ typedef struct
     uint32_t time_ms;
 } of_elements_t;
 
-// bias estimates for the IMUs that are enabled but not being used by this core.
 typedef struct
 {
-    fpVector3_t gyro_bias;
-    fpVector3_t gyro_scale;
-    float accel_zbias;
-} inactiveBias_t;
+    uint8_t elsize;
+    struct {
+        gps_elements_t *gps_buffer;
+        mag_elements_t *mag_buffer;
+        baro_elements_t *baro_buffer;
+        range_elements_t *range_buffer;
+        tas_elements_t *tas_buffer;
+        of_elements_t *of_buffer;
+    } buffer;
+    uint8_t size;
+    uint8_t oldest;
+    uint8_t count;
+} ekf_ring_buffer;
+
+typedef enum {
+    GPS_RING_BUFFER = 0,
+    MAG_RING_BUFFER,
+    BARO_RING_BUFFER,
+    RANGE_RING_BUFFER,
+    TAS_RING_BUFFER,
+    OPTFLOW_RING_BUFFER
+} EKF_Buffer_e;
 
 // update the navigation filter status
 void updateFilterStatus(void);
@@ -477,9 +490,6 @@ void correctDeltaVelocity(fpVector3_t *delVel, float delVelDT);
 
 // update IMU delta angle and delta velocity measurements
 void readIMUData(void);
-
-// update estimate of inactive bias states
-void learnInactiveBiases(void);
 
 // check for new valid GPS data and update stored measurement if available
 void readGpsData(void);
@@ -797,7 +807,6 @@ extern nav_filter_status_t filterStatus;     // contains the status of various f
 extern float ekfOriginHgtVar;                // Variance of the EKF WGS-84 origin height estimate (m^2)
 extern float ekfGpsRefHgt;                   // floating point representation of the WGS-84 reference height used to convert GPS height to local height (m)
 extern uint32_t lastOriginHgtTime_ms;        // last time the ekf's WGS-84 origin height was corrected
-extern fpVector3_t outputTrackError;         // attitude (rad), velocity (m/s) and position (m) tracking error magnitudes from the output observer
 
 // variables used by the pre-initialisation GPS checks
 extern gpsLocation_t gpsloc_prev;            // LLH location of previous GPS measurement
@@ -946,10 +955,9 @@ typedef struct
 extern vertCompFiltState_t vertCompFiltState;
 extern faultStatus_t faultStatus;
 extern mag_state_t mag_state;
-extern inactiveBias_t inactiveBias;
 
 // string for using EKF messages in the OSD
-extern char *osd_ekf_status_string;
+extern char osd_ekf_status_string[50];
 
 // earth field from WMM tables
 extern bool have_table_earth_field;      // true when we have initialised table_earth_field_ga

@@ -72,7 +72,7 @@ void readRangeFinder(void)
             rangeDataNew.rng = MAX(storedRngMeas[midIndex], rngOnGnd);
 
             // write data to buffer with time stamp to be fused when the fusion time horizon catches up with it
-            ekf_ring_buffer_push(&storedRange, &rangeDataNew);
+            ekf_ring_buffer_push(&storedRange, RANGE_RING_BUFFER, &rangeDataNew);
 
             // indicate we have updated the measurement
             rngValidMeaTime_ms = imuSampleTime_ms;
@@ -84,7 +84,7 @@ void readRangeFinder(void)
             rangeDataNew.rng = rngOnGnd;
 
             // write data to buffer with time stamp to be fused when the fusion time horizon catches up with it
-            ekf_ring_buffer_push(&storedRange, &rangeDataNew);
+            ekf_ring_buffer_push(&storedRange, RANGE_RING_BUFFER, &rangeDataNew);
 
             // indicate we have updated the measurement
             rngValidMeaTime_ms = imuSampleTime_ms;
@@ -178,7 +178,7 @@ bool compassConsistent(void)
 // check for new magnetometer data and update store measurements if available
 void readMagData(void)
 {
-    if (!use_compass())
+    if (!ekf_useCompass())
     {
         magSensorFailed = true;
         return;
@@ -212,7 +212,7 @@ void readMagData(void)
 
     // do not accept new compass data faster than 14Hz (nominal rate is 10Hz) to prevent high processor loading
     // because magnetometer fusion is an expensive step and we could overflow the FIFO buffer
-    if (use_compass() && compassLastUpdate() - lastMagUpdate_us > 70000)
+    if (ekf_useCompass() && compassLastUpdate() - lastMagUpdate_us > 70000)
     {
         // detect changes to magnetometer offset parameters and reset states
         fpVector3_t nowMagOffsets = {.v = {(compassConfig()->magZero.raw[X] / 1024 * compassConfig()->magGain[X]),
@@ -257,7 +257,7 @@ void readMagData(void)
         consistentMagData = compassConsistent();
 
         // save magnetometer measurement to buffer to be fused later
-        ekf_ring_buffer_push(&storedMag, &magDataNew);
+        ekf_ring_buffer_push(&storedMag, MAG_RING_BUFFER, &magDataNew);
 
         // remember time we read compass, to detect compass sensor failure
         lastMagRead_ms = imuSampleTime_ms;
@@ -276,9 +276,6 @@ void readIMUData(void)
     // average IMU sampling rate
     dtIMUavg = 1.0f / (float)ekfParam._frameTimeUsec;
 
-    // update the inactive bias states
-    learnInactiveBiases();
-
     // Get delta angle data from accelerometer
     readDeltaVelocity(&imuDataNew.delVel, &imuDataNew.delVelDT);
 
@@ -295,7 +292,7 @@ void readIMUData(void)
     // Rotate quaternon atitude from previous to new and normalise.
     // Accumulation using quaternions prevents introduction of coning errors due to downsampling
     quaternion_rotate(&imuQuatDownSampleNew, imuDataNew.delAng);
-    quaternionNormalize(&imuQuatDownSampleNew, &imuQuatDownSampleNew);
+    quaternion_normalize(&imuQuatDownSampleNew);
 
     // Rotate the latest delta velocity into body frame at the start of accumulation
     fpMat3_t deltaRotMat;
@@ -387,7 +384,7 @@ void readGpsData(void)
     }
 
     // check for new GPS data do not accept data at a faster rate than 14Hz to avoid overflowing the FIFO buffer
-    if (gpsState.lastMessageMs - lastTimeGpsReceived_ms > 70)
+    if (sensors(SENSOR_GPS) && gpsState.lastMessageMs - lastTimeGpsReceived_ms > 70)
     {
         if (gpsSol.fixType >= GPS_FIX_3D)
         {
@@ -462,7 +459,8 @@ void readGpsData(void)
                 gpsNoiseScaler = 1.4f;
             }
             else
-            { // <= 4 satellites or in constant position mode
+            {
+                // <= 4 satellites or in constant position mode
                 gpsNoiseScaler = 2.0f;
             }
 
@@ -551,7 +549,7 @@ void readGpsData(void)
                 {
                     gpsDataNew.hgt = 0.01 * (gpsloc.alt - EKF_origin.alt);
                 }
-                ekf_ring_buffer_push(&storedGPS, &gpsDataNew);
+                ekf_ring_buffer_push(&storedGPS, GPS_RING_BUFFER, &gpsDataNew);
                 // declare GPS available for use
                 gpsNotAvailable = false;
             }
@@ -570,23 +568,32 @@ void readDeltaVelocity(fpVector3_t *dVel, float *dVel_dt)
     accGetMeasuredAcceleration(&getAcc); // Calculate accel in body frame in cm/s
 
     // convert the accel in body frame in cm/s to m/s
-    dVel->x = CENTIMETERS_TO_METERS(getAcc.x);
-    dVel->y = CENTIMETERS_TO_METERS(getAcc.y);
-    dVel->z = CENTIMETERS_TO_METERS(getAcc.z);
+    getAcc.x = CENTIMETERS_TO_METERS(getAcc.x);
+    getAcc.y = CENTIMETERS_TO_METERS(getAcc.y);
+    getAcc.z = CENTIMETERS_TO_METERS(getAcc.z);
 
-    *dVel_dt = getTaskDeltaTime(TASK_SELF) * 1.0e-6f;
+    *dVel_dt = getTaskDeltaTime(TASK_PID) * 1.0e-6f;
     *dVel_dt = MAX(*dVel_dt, 1.0e-4f);
     *dVel_dt = MIN(*dVel_dt, 1.0e-1f);
+
+    dVel->x = getAcc.x * *dVel_dt;
+    dVel->y = getAcc.y * *dVel_dt;
+    dVel->z = -getAcc.z * *dVel_dt;
 }
 
 // read the delta angle and corresponding time interval from the IMU
 void readDeltaAngle(fpVector3_t *dAng, float *dAng_dt)
 {
-    gyroGetMeasuredRotationRate(dAng); // Calculate gyro rate in body frame in rad/s
+    fpVector3_t getGyro;
+    gyroGetMeasuredRotationRate(&getGyro); // Calculate gyro rate in body frame in rad/s
 
-    *dAng_dt = getTaskDeltaTime(TASK_SELF) * 1.0e-6f;
+    *dAng_dt = getTaskDeltaTime(TASK_GYRO) * 1.0e-6f;
     *dAng_dt = MAX(*dAng_dt, 1.0e-4f);
     *dAng_dt = MIN(*dAng_dt, 1.0e-1f);
+
+    dAng->x = getGyro.x * *dAng_dt;
+    dAng->y = getGyro.y * *dAng_dt;
+    dAng->z = -getGyro.z * *dAng_dt;
 }
 
 // check for new pressure altitude measurement data and update stored measurement if available
@@ -594,7 +601,7 @@ void readBaroData(void)
 {
     // check to see if baro measurement has changed so we know if a new measurement has arrived
     // do not accept data at a faster rate than 14Hz to avoid overflowing the FIFO buffer
-    if (US2MS(posEstimator.baro.lastUpdateTime) - lastBaroReceived_ms > 70)
+    if (sensors(SENSOR_BARO) && baro.calibrationFinished && US2MS(posEstimator.baro.lastUpdateTime) - lastBaroReceived_ms > 70)
     {
         baroDataNew.hgt = CENTIMETERS_TO_METERS(posEstimator.baro.rawAlt - posEstimator.baro.altOffSet);
 
@@ -618,7 +625,7 @@ void readBaroData(void)
         baroDataNew.time_ms = MAX(baroDataNew.time_ms, imuDataDelayed.time_ms);
 
         // save baro measurement to buffer to be fused later
-        ekf_ring_buffer_push(&storedBaro, &baroDataNew);
+        ekf_ring_buffer_push(&storedBaro, BARO_RING_BUFFER, &baroDataNew);
     }
 }
 
@@ -655,6 +662,7 @@ void correctEkfOriginHeight(void)
         // by definition our height source is absolute so cannot run this filter
         return;
     }
+
     lastOriginHgtTime_ms = imuDataDelayed.time_ms;
 
     // calculate the observation variance assuming EKF error relative to datum is independent of GPS observation error
@@ -684,7 +692,7 @@ void readAirSpdData(void)
     // if airspeed reading is valid and is set by the user to be used and has been updated then
     // we take a new reading, convert from EAS to TAS and set the flag letting other functions
     // know a new measurement is available
-    if (useAirspeed() && pitot.lastSeenHealthyMs != timeTasReceived_ms)
+    if (useAirspeed() && pitot.calibrationFinished && pitot.lastSeenHealthyMs != timeTasReceived_ms)
     {
         tasDataNew.tas = CENTIMETERS_TO_METERS(getAirspeedEstimate());
         timeTasReceived_ms = pitot.lastSeenHealthyMs;
@@ -694,10 +702,10 @@ void readAirSpdData(void)
         tasDataNew.time_ms -= localFilterTimeStep_ms / 2;
 
         // Save data into the buffer to be fused when the fusion time horizon catches up with it
-        ekf_ring_buffer_push(&storedTAS, &tasDataNew);
+        ekf_ring_buffer_push(&storedTAS, TAS_RING_BUFFER, &tasDataNew);
     }
     // Check the buffer for measurements that have been overtaken by the fusion time horizon and need to be fused
-    tasDataToFuse = ekf_ring_buffer_recall(&storedTAS, &tasDataDelayed, imuDataDelayed.time_ms);
+    tasDataToFuse = ekf_ring_buffer_recall(&storedTAS, TAS_RING_BUFFER, &tasDataDelayed, imuDataDelayed.time_ms);
 }
 
 /*
@@ -743,24 +751,12 @@ float MagDeclination(void)
         return table_declination;
     }
 
-    if (!use_compass())
+    if (!ekf_useCompass())
     {
         return 0.0f;
     }
 
     return compassConfig()->mag_declination;
-}
-
-/*
-  update estimates of inactive bias states. This keeps inactive IMUs
-  as hot-spares so we can switch to them without causing a jump in the
-  error
- */
-void learnInactiveBiases(void)
-{
-    inactiveBias.gyro_bias = ekfStates.stateStruct.gyro_bias;
-    inactiveBias.gyro_scale = ekfStates.stateStruct.gyro_scale;
-    inactiveBias.accel_zbias = ekfStates.stateStruct.accel_zbias;
 }
 
 // Writes the default equivalent airspeed in m/s to be used in forward flight if a measured airspeed is required and not available.

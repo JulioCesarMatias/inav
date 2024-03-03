@@ -311,7 +311,9 @@ void baroStartCalibration(void)
 
 int32_t baroCalculateAltitude(void)
 {
-    if (!baroIsCalibrationComplete()) {
+    baro.calibrationFinished = baroIsCalibrationComplete();
+
+    if (!baro.calibrationFinished) {
         zeroCalibrationAddValueS(&zeroCalibration, baro.baroPressure);
 
         if (zeroCalibrationIsCompleteS(&zeroCalibration)) {

@@ -90,6 +90,7 @@ bool ekfInitialiseFilter(void)
 {
     if (ekfParam._enable == 0)
     {
+        strcpy(osd_ekf_status_string, "EKF disabled");
         // return false;
     }
 
@@ -170,21 +171,29 @@ bool ekfInitialiseFilter(void)
     ekfParam.fusionTimeStep_ms = 10;        // The minimum time interval between covariance predictions and measurement fusions in msec
     ekfParam.maxYawEstVelInnov = 2.0f;      // Maximum acceptable length of the velocity innovation returned by the EKF-GSF yaw estimator (m/s)
     ekfParam.imuSampleTime_us = micros();
-    ekfParam._frameTimeUsec = 1e6 / getLooptime();
-    ekfParam._framesPerPrediction = (uint8_t)(EKF_TARGET_DT / (ekfParam._frameTimeUsec * 1.0e-6) + 0.5f); // expected number of IMU frames per prediction
+    ekfParam._frameTimeUsec = 1e6f / getLooptime();
+    ekfParam._framesPerPrediction = (uint8_t)(EKF_TARGET_DT / ((float)ekfParam._frameTimeUsec * 1.0e-6f) + 0.5f); // expected number of IMU frames per prediction
 
     if (!statesInitialised)
     {
-        setup_core();
+        if (!setup_core())
+        {
+            strcpy(osd_ekf_status_string, "EKF core setup failed");
+            return false;
+        }
     }
 
     // invalidate shared origin
     ekfParam.common_origin_valid = false;
 
     // initialise the EKF. We return success only if EKF initialise successfully
-    bool ret = coreInitialiseFilterBootstrap();
+    if (!coreInitialiseFilterBootstrap())
+    {
+        strcpy(osd_ekf_status_string, "EKF filter bootstrap failed");
+        return false;
+    }
 
-    return ret;
+    return true;
 }
 
 // Update Filter States - this should be called whenever new IMU data is available
@@ -401,9 +410,9 @@ void writeOptFlowMeas(const uint8_t rawFlowQuality, const fpVector2_t rawFlowRat
         // Prevent time delay exceeding age of oldest IMU data in the buffer
         ofDataNew.time_ms = MAX(ofDataNew.time_ms, imuDataDelayed.time_ms);
         // Save data to buffer
-        ekf_ring_buffer_push(&storedOF, &ofDataNew);
+        ekf_ring_buffer_push(&storedOF, OPTFLOW_RING_BUFFER, &ofDataNew);
         // Check for data at the fusion time horizon
-        flowDataToFuse = ekf_ring_buffer_recall(&storedOF, &ofDataDelayed, imuDataDelayed.time_ms);
+        flowDataToFuse = ekf_ring_buffer_recall(&storedOF, OPTFLOW_RING_BUFFER, &ofDataDelayed, imuDataDelayed.time_ms);
     }
 }
 

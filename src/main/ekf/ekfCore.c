@@ -173,7 +173,6 @@ nav_filter_status_t filterStatus;     // contains the status of various filter o
 float ekfOriginHgtVar;                // Variance of the EKF WGS-84 origin height estimate (m^2)
 float ekfGpsRefHgt;                   // floating point representation of the WGS-84 reference height used to convert GPS height to local height (m)
 uint32_t lastOriginHgtTime_ms;        // last time the ekf's WGS-84 origin height was corrected
-fpVector3_t outputTrackError;         // attitude (rad), velocity (m/s) and position (m) tracking error magnitudes from the output observer
 
 // variables used by the pre-initialisation GPS checks
 gpsLocation_t gpsloc_prev;            // LLH location of previous GPS measurement
@@ -265,10 +264,9 @@ uint8_t magYawAnomallyCount;       // Number of times the yaw has been reset due
 vertCompFiltState_t vertCompFiltState;
 faultStatus_t faultStatus;
 mag_state_t mag_state;
-inactiveBias_t inactiveBias;
 
 // string for using EKF messages in the OSD
-char *osd_ekf_status_string;
+char osd_ekf_status_string[50];
 
 // earth field from WMM tables
 bool have_table_earth_field;      // true when we have initialised table_earth_field_ga
@@ -308,32 +306,32 @@ bool setup_core(void)
         imu_buffer_length = 26;
     }
 
-    if (!ekf_ring_buffer_init_size(&storedGPS, OBS_BUFFER_LENGTH, sizeof(gps_elements_t)))
+    if (!ekf_ring_buffer_init_size(&storedGPS, GPS_RING_BUFFER, OBS_BUFFER_LENGTH, sizeof(gps_elements_t)))
     {
         return false;
     }
 
-    if (!ekf_ring_buffer_init_size(&storedMag, OBS_BUFFER_LENGTH, sizeof(mag_elements_t)))
+    if (!ekf_ring_buffer_init_size(&storedMag, MAG_RING_BUFFER, OBS_BUFFER_LENGTH, sizeof(mag_elements_t)))
     {
         return false;
     }
 
-    if (!ekf_ring_buffer_init_size(&storedBaro, OBS_BUFFER_LENGTH, sizeof(baro_elements_t)))
+    if (!ekf_ring_buffer_init_size(&storedBaro, BARO_RING_BUFFER, OBS_BUFFER_LENGTH, sizeof(baro_elements_t)))
     {
         return false;
     }
 
-    if (!ekf_ring_buffer_init_size(&storedTAS, OBS_BUFFER_LENGTH, sizeof(tas_elements_t)))
+    if (!ekf_ring_buffer_init_size(&storedTAS, TAS_RING_BUFFER, OBS_BUFFER_LENGTH, sizeof(tas_elements_t)))
     {
         return false;
     }
 
-    if (!ekf_ring_buffer_init_size(&storedOF, FLOW_BUFFER_LENGTH, sizeof(of_elements_t)))
+    if (!ekf_ring_buffer_init_size(&storedOF, OPTFLOW_RING_BUFFER, FLOW_BUFFER_LENGTH, sizeof(of_elements_t)))
     {
         return false;
     }
 
-    if (!ekf_ring_buffer_init_size(&storedRange, OBS_BUFFER_LENGTH, sizeof(range_elements_t)))
+    if (!ekf_ring_buffer_init_size(&storedRange, RANGE_RING_BUFFER, OBS_BUFFER_LENGTH, sizeof(range_elements_t)))
     {
         return false;
     }
@@ -595,7 +593,7 @@ bool coreInitialiseFilterBootstrap(void)
         pitch = asinf(initAccVec.x);
 
         // calculate initial roll angle
-        roll = atan2f(-initAccVec.y, -initAccVec.z);
+        roll = atan2f(initAccVec.y, initAccVec.z);
     }
 
     // calculate initial roll and pitch orientation
@@ -637,13 +635,6 @@ bool coreInitialiseFilterBootstrap(void)
 
     // set to true now that states have be initialised
     statesInitialised = true;
-
-    // reset inactive biases
-    vectorZero(&inactiveBias.gyro_bias);
-    inactiveBias.accel_zbias = 0.0f;
-    inactiveBias.gyro_scale.x = 1.0f;
-    inactiveBias.gyro_scale.y = 1.0f;
-    inactiveBias.gyro_scale.z = 1.0f;
 
     // we initially return false to wait for the IMU buffer to fill
     return false;
@@ -779,17 +770,17 @@ void coreUpdateFilter(bool predict)
 
 void correctDeltaAngle(fpVector3_t *delAng, float delAngDT)
 {
-    delAng->x = delAng->x * ekfStates.stateStruct.gyro_scale.x;
-    delAng->y = delAng->y * ekfStates.stateStruct.gyro_scale.y;
-    delAng->z = delAng->z * ekfStates.stateStruct.gyro_scale.z;
-    delAng->x -= inactiveBias.gyro_bias.x * (delAngDT / dtEkfAvg);
-    delAng->y -= inactiveBias.gyro_bias.y * (delAngDT / dtEkfAvg);
-    delAng->z -= inactiveBias.gyro_bias.z * (delAngDT / dtEkfAvg);
+    delAng->x *= ekfStates.stateStruct.gyro_scale.x;
+    delAng->y *= ekfStates.stateStruct.gyro_scale.y;
+    delAng->z *= ekfStates.stateStruct.gyro_scale.z;
+    delAng->x -= ekfStates.stateStruct.gyro_bias.x * (delAngDT / dtEkfAvg);
+    delAng->y -= ekfStates.stateStruct.gyro_bias.y * (delAngDT / dtEkfAvg);
+    delAng->z -= ekfStates.stateStruct.gyro_bias.z * (delAngDT / dtEkfAvg);
 }
 
 void correctDeltaVelocity(fpVector3_t *delVel, float delVelDT)
 {
-    delVel->z -= inactiveBias.accel_zbias * (delVelDT / dtEkfAvg);
+    delVel->z -= ekfStates.stateStruct.accel_zbias * (delVelDT / dtEkfAvg);
 }
 
 /*
@@ -811,7 +802,7 @@ void UpdateStrapdownEquationsNED(void)
     mulResult.z *= imuDataDelayed.delAngDT;
     fpVector3_t vectorDiff = {.v = {delAngCorrected.x - mulResult.x, delAngCorrected.y - mulResult.y, delAngCorrected.z - mulResult.z}};
     quaternion_rotate(&ekfStates.stateStruct.quat, vectorDiff);
-    quaternionNormalize(&ekfStates.stateStruct.quat, &ekfStates.stateStruct.quat);
+    quaternion_normalize(&ekfStates.stateStruct.quat);
 
     // transform body delta velocities to delta velocities in the nav frame
     // use the nav frame from previous time step as the delta velocities
@@ -822,7 +813,7 @@ void UpdateStrapdownEquationsNED(void)
     delVelNav.z += GRAVITY_MSS * imuDataDelayed.delVelDT;
 
     // calculate the nav to body cosine matrix
-    ekfStates.stateStruct.quat = quaternion_inverse(quaternion_from_rotation_matrix(prevTnb));
+    quaternionToRotationMatrix(quaternion_inverse(ekfStates.stateStruct.quat), &prevTnb);
 
     // calculate the rate of change of velocity (used for launch detect and other functions)
     velDotNED.x = delVelNav.x / imuDataDelayed.delVelDT;
@@ -834,8 +825,7 @@ void UpdateStrapdownEquationsNED(void)
     velDotNEDfilt.y = velDotNED.y * 0.05f + velDotNEDfilt.y * 0.95f;
     velDotNEDfilt.z = velDotNED.z * 0.05f + velDotNEDfilt.z * 0.95f;
 
-    // calculate a magnitude of the filtered nav acceleration (required for GPS
-    // variance estimation)
+    // calculate a magnitude of the filtered nav acceleration (required for GPS variance estimation)
     accNavMag = calc_length_pythagorean_3D(velDotNEDfilt.x, velDotNEDfilt.y, velDotNEDfilt.z);
     accNavMagHoriz = calc_length_pythagorean_2D(velDotNEDfilt.x, velDotNEDfilt.y);
 
@@ -902,8 +892,8 @@ void calcOutputStates(void)
 
     // update the quaternion states by rotating from the previous attitude through
     // the delta angle rotation quaternion and normalise
-    quaternionMultiply(&outputDataNew.quat, &outputDataNew.quat, &deltaQuat);
-    quaternionNormalize(&outputDataNew.quat, &outputDataNew.quat);
+    quaternion_multiply_assign(&outputDataNew.quat, &deltaQuat);
+    quaternion_normalize(&outputDataNew.quat);
 
     // calculate the body to nav cosine matrix
     fpMat3_t Tbn_temp;
@@ -949,32 +939,28 @@ void calcOutputStates(void)
     {
         // store the states at the output time horizon
         memcpy(ekf_output_buffer_get(&storedOutput, storedIMU.youngest), &outputDataNew, sizeof(output_elements_t));
-        // storedOutput.buffer[storedIMU.youngest] = outputDataNew;
 
         // recall the states from the fusion time horizon
-        // outputDataDelayed = storedOutput.buffer[storedIMU.oldest];
         memcpy(&outputDataDelayed, ekf_output_buffer_get(&storedOutput, storedIMU.oldest), sizeof(output_elements_t));
 
         // divide the demanded quaternion by the estimated to get the error
         fpQuaternion_t quatErr = quaternionDivision(ekfStates.stateStruct.quat, outputDataDelayed.quat);
 
         // Convert to a delta rotation using a small angle approximation
-        quaternionNormalize(&quatErr, &quatErr);
-        fpVector3_t deltaAngErr;
+        quaternion_normalize(&quatErr);
+
         float scaler;
 
         if (quatErr.q0 >= 0.0f)
         {
             scaler = 2.0f;
         }
-        else
+        else 
         {
             scaler = -2.0f;
         }
 
-        deltaAngErr.x = scaler * quatErr.q1;
-        deltaAngErr.y = scaler * quatErr.q2;
-        deltaAngErr.z = scaler * quatErr.q3;
+        fpVector3_t deltaAngErr = {.v = {scaler * quatErr.q1, scaler * quatErr.q2, scaler * quatErr.q3}};
 
         // calculate a gain that provides tight tracking of the estimator states and
         // adjust for changes in time delay to maintain consistent damping ratio of ~0.7
@@ -996,11 +982,6 @@ void calcOutputStates(void)
         fpVector3_t posErr = {.v = {(ekfStates.stateStruct.position.x - outputDataDelayed.position.x),
                                     (ekfStates.stateStruct.position.y - outputDataDelayed.position.y),
                                     (ekfStates.stateStruct.position.z - outputDataDelayed.position.z)}};
-
-        // collect magnitude tracking error for diagnostics
-        outputTrackError.x = calc_length_pythagorean_3D(deltaAngErr.x, deltaAngErr.y, deltaAngErr.z);
-        outputTrackError.y = calc_length_pythagorean_3D(velErr.x, velErr.y, velErr.z);
-        outputTrackError.z = calc_length_pythagorean_3D(posErr.x, posErr.y, posErr.z);
 
         // convert user specified time constant from centi-seconds to seconds
         float tauPosVel = constrainf(0.01f * (float)ekfParam._tauVelPosOutput, 0.1f, 0.5f);
@@ -1033,7 +1014,6 @@ void calcOutputStates(void)
         for (unsigned index = 0; index < imu_buffer_length; index++)
         {
             memcpy(&outputStates, ekf_output_buffer_get(&storedOutput, index), sizeof(output_elements_t));
-            // outputStates = storedOutput.buffer[index];
 
             // a constant  velocity correction is applied
             outputStates.velocity.x += velCorrection.x;
@@ -1047,12 +1027,10 @@ void calcOutputStates(void)
 
             // push the updated data to the buffer
             memcpy(ekf_output_buffer_get(&storedOutput, index), &outputStates, sizeof(output_elements_t));
-            // storedOutput.buffer[index] = outputStates;
         }
 
         // update output state to corrected values
         memcpy(&outputDataNew, ekf_output_buffer_get(&storedOutput, storedIMU.youngest), sizeof(output_elements_t));
-        // outputDataNew = storedOutput.buffer[storedIMU.youngest];
     }
 }
 
@@ -1641,7 +1619,6 @@ void StoreOutputReset(void)
     for (uint8_t i = 0; i < imu_buffer_length; i++)
     {
         memcpy(ekf_output_buffer_get(&storedOutput, i), &outputDataNew, sizeof(output_elements_t));
-        // storedOutput.buffer[i] = outputDataNew;
     }
     outputDataDelayed = outputDataNew;
     // reset the states for the complementary filter used to provide a vertical position dervative output
@@ -1652,15 +1629,15 @@ void StoreOutputReset(void)
 // Rotate the stored output quaternion history through a quaternion rotation
 void StoreQuatRotate(fpQuaternion_t *deltaQuat)
 {
-    quaternionMultiply(&outputDataNew.quat, &outputDataNew.quat, deltaQuat);
+    quaternion_multiply_assign(&outputDataNew.quat, deltaQuat);
 
     // write current measurement to entire table
     for (uint8_t i = 0; i < imu_buffer_length; i++)
     {
-        quaternionMultiply(&storedOutput.buffer[i].quat, &storedOutput.buffer[i].quat, deltaQuat);
+        quaternion_multiply_assign(&storedOutput.buffer[i].quat, deltaQuat);
     }
 
-    quaternionMultiply(&outputDataDelayed.quat, &outputDataDelayed.quat, deltaQuat);
+    quaternion_multiply_assign(&outputDataDelayed.quat, deltaQuat);
 }
 
 // force symmetry on the covariance matrix to prevent ill-conditioning
@@ -1807,7 +1784,7 @@ fpQuaternion_t calcQuatAndFieldStates(float roll, float pitch)
     fpVector3_t initMagNED;
     fpQuaternion_t initQuat;
 
-    if (use_compass())
+    if (ekf_useCompass())
     {
         // calculate rotation matrix from body to NED frame
         matrixFromEuler(&Tbn, roll, pitch, 0.0f);

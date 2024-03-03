@@ -10,7 +10,7 @@ void coreResetGyroBias(void)
     zeroRows(P, 9, 11);
     zeroCols(P, 9, 11);
 
-    P[9][9] = sq(RADIANS_TO_DEGREES(0.5 * dtIMUavg));
+    P[9][9] = sq(RADIANS_TO_DEGREES(0.5f * dtIMUavg));
     P[10][10] = P[9][9];
     P[11][11] = P[9][9];
 }

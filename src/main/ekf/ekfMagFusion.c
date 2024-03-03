@@ -186,7 +186,7 @@ void realignYawGPS(void)
             gpsYawResetRequest = false;
             magYawResetRequest = false;
 
-            if (use_compass())
+            if (ekf_useCompass())
             {
                 // request a mag field reset which may enable us to use the magnetometer if the previous fault was due to bad initialisation
                 magStateResetRequest = true;
@@ -206,7 +206,7 @@ void SelectMagFusion(void)
 
     // Handle case where we are not using a yaw sensor of any type and and attempt to reset the yaw in
     // flight using the output from the GSF yaw estimator.
-    if (!use_compass() && tiltAlignComplete)
+    if (!ekf_useCompass() && tiltAlignComplete)
     {
         if ((onGround || !assume_zero_sideslip()) && (imuSampleTime_ms - lastYawTime_ms > 140))
         {
@@ -226,7 +226,7 @@ void SelectMagFusion(void)
         magTimeout = false;
         lastHealthyMagTime_ms = imuSampleTime_ms;
     }
-    else if ((imuSampleTime_ms - lastHealthyMagTime_ms) > ekfParam.magFailTimeLimit_ms && use_compass())
+    else if ((imuSampleTime_ms - lastHealthyMagTime_ms) > ekfParam.magFailTimeLimit_ms && ekf_useCompass())
     {
         magTimeout = true;
     }
@@ -235,17 +235,17 @@ void SelectMagFusion(void)
     readMagData();
 
     // check for availability of magnetometer data to fuse
-    magDataToFuse = ekf_ring_buffer_recall(&storedMag, &magDataDelayed, imuDataDelayed.time_ms);
+    magDataToFuse = ekf_ring_buffer_recall(&storedMag, MAG_RING_BUFFER, &magDataDelayed, imuDataDelayed.time_ms);
 
     // Control reset of yaw and magnetic field states if we are using compass data
-    if (magDataToFuse && use_compass())
+    if (magDataToFuse && ekf_useCompass())
     {
         controlMagYawReset();
     }
 
     // determine if conditions are right to start a new fusion cycle
     // wait until the EKF time horizon catches up with the measurement
-    bool dataReady = (magDataToFuse && statesInitialised && use_compass() && yawAlignComplete);
+    bool dataReady = (magDataToFuse && statesInitialised && ekf_useCompass() && yawAlignComplete);
     if (dataReady)
     {
         // use the simple method of declination to maintain heading if we cannot use the magnetic field states
@@ -803,7 +803,7 @@ void fuseEulerYaw(void)
         fpVector3_t euler321;
         quaternionToEuler(ekfStates.stateStruct.quat, &euler321.x, &euler321.y, &euler321.z);
         predicted_yaw = euler321.z;
-        if (use_compass() && yawAlignComplete && magStateInitComplete)
+        if (ekf_useCompass() && yawAlignComplete && magStateInitComplete)
         {
             // Use measured mag components rotated into earth frame to measure yaw
             matrixFromEuler(&Tbn_zeroYaw, euler321.x, euler321.y, 0.0f);
@@ -876,7 +876,7 @@ void fuseEulerYaw(void)
         // calculate predicted and measured yaw angle
         fpVector3_t euler312 = quaternion_to_vector312(ekfStates.stateStruct.quat);
         predicted_yaw = euler312.z;
-        if (use_compass() && yawAlignComplete && magStateInitComplete)
+        if (ekf_useCompass() && yawAlignComplete && magStateInitComplete)
         {
             // Use measured mag components rotated into earth frame to measure yaw
             Tbn_zeroYaw = matrix_from_euler312(euler312.x, euler312.y, 0.0f);
@@ -1274,7 +1274,7 @@ bool EKFGSF_resetMainFilterYaw(void)
         EKFGSF_yaw_reset_ms = imuSampleTime_ms;
         EKFGSF_yaw_reset_count++;
 
-        if (!use_compass())
+        if (!ekf_useCompass())
         {
             strcpy(osd_ekf_status_string, "EKF IMU yaw aligned using GPS");
         }
@@ -1304,9 +1304,8 @@ void resetQuatStateYawOnly(float yaw, float yawVariance, bool isDeltaYaw)
 {
     fpQuaternion_t quatBeforeReset = ekfStates.stateStruct.quat;
 
-    // check if we should use a 321 or 312 Rotation sequence and update the quaternion
-    // states using the preferred yaw definition
-    ekfStates.stateStruct.quat = quaternion_inverse(quaternion_from_rotation_matrix(prevTnb));
+    // check if we should use a 321 or 312 Rotation sequence and update the quaternion states using the preferred yaw definition
+    quaternionToRotationMatrix(quaternion_inverse(ekfStates.stateStruct.quat), &prevTnb);
     fpVector3_t eulerAngles;
     if (fabsf(prevTnb.m[2][0]) < fabsf(prevTnb.m[2][1]))
     {
@@ -1330,7 +1329,7 @@ void resetQuatStateYawOnly(float yaw, float yawVariance, bool isDeltaYaw)
     }
 
     // Update the rotation matrix
-    ekfStates.stateStruct.quat = quaternion_inverse(quaternion_from_rotation_matrix(prevTnb));
+    quaternionToRotationMatrix(quaternion_inverse(ekfStates.stateStruct.quat), &prevTnb);
 
     float deltaYaw = wrap_PI(yaw - eulerAngles.z);
 

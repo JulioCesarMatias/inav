@@ -110,9 +110,7 @@ static inline void matrixFromEuler(fpMat3_t *m, float roll, float pitch, float y
   m->m[2][2] = cr * cp;
 }
 
-/*
-  fill the matrix from Euler angles in radians in 312 convention
-*/
+// fill the matrix from Euler angles in radians in 312 convention
 static inline fpMat3_t matrix_from_euler312(float roll, float pitch, float yaw)
 {
   fpMat3_t m;
@@ -160,6 +158,25 @@ static inline bool is_zero(float val)
   return fabsf(val) < 1e-6; // Adjust the tolerance level as needed
 }
 
+// Function to multiply two quaternions and store the result in the first quaternion
+static inline void quaternion_multiply_assign(fpQuaternion_t *q1, const fpQuaternion_t *q2)
+{
+  const float w1 = q1->q0;
+  const float x1 = q1->q1;
+  const float y1 = q1->q2;
+  const float z1 = q1->q3;
+
+  const float w2 = q2->q0;
+  const float x2 = q2->q1;
+  const float y2 = q2->q2;
+  const float z2 = q2->q3;
+
+  q1->q0 = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2;
+  q1->q1 = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2;
+  q1->q2 = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2;
+  q1->q3 = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2;
+}
+
 static inline fpQuaternion_t quaternionDivision(const fpQuaternion_t v, const fpQuaternion_t v2)
 {
   fpQuaternion_t ret;
@@ -174,12 +191,25 @@ static inline fpQuaternion_t quaternionDivision(const fpQuaternion_t v, const fp
   const float rquat2 = v2.q2;
   const float rquat3 = v2.q3;
 
-  ret.q0 = (rquat0 * quat0 + rquat1 * quat1 + rquat2 * quat2 + rquat3 * quat3);
-  ret.q1 = (rquat0 * quat1 - rquat1 * quat0 - rquat2 * quat3 + rquat3 * quat2);
-  ret.q2 = (rquat0 * quat2 + rquat1 * quat3 - rquat2 * quat0 - rquat3 * quat1);
-  ret.q3 = (rquat0 * quat3 - rquat1 * quat2 + rquat2 * quat1 - rquat3 * quat0);
+  ret.q0 = rquat0 * quat0 + rquat1 * quat1 + rquat2 * quat2 + rquat3 * quat3;
+  ret.q1 = rquat0 * quat1 - rquat1 * quat0 - rquat2 * quat3 + rquat3 * quat2;
+  ret.q2 = rquat0 * quat2 + rquat1 * quat3 - rquat2 * quat0 - rquat3 * quat1;
+  ret.q3 = rquat0 * quat3 - rquat1 * quat2 + rquat2 * quat1 - rquat3 * quat0;
 
   return ret;
+}
+
+static inline void quaternion_normalize(fpQuaternion_t *q)
+{
+    const float quatMag = sqrtf(sq(q->q0) + sq(q->q1) + sq(q->q2) + sq(q->q3));
+
+    if (!is_zero(quatMag)) {
+        const float quatMagInv = 1.0f / quatMag;
+        q->q0 *= quatMagInv;
+        q->q1 *= quatMagInv;
+        q->q2 *= quatMagInv;
+        q->q3 *= quatMagInv;
+    }
 }
 
 // create a quaternion from its axis-angle representation
@@ -192,6 +222,7 @@ static inline void quaternion_from_axis_angle_helper(fpQuaternion_t *quat, fpVec
     quat->q1 = quat->q2 = quat->q3 = 0.0f;
     return;
   }
+
   const float st2 = sinf(0.5f * theta);
 
   quat->q0 = cosf(0.5f * theta);
@@ -204,15 +235,18 @@ static inline void quaternion_from_axis_angle_helper(fpQuaternion_t *quat, fpVec
 static inline void quaternion_from_axis_angle(fpQuaternion_t *quat, fpVector3_t v)
 {
   float theta = calc_length_pythagorean_3D(v.x, v.y, v.z);
+
   if (is_zero(theta))
   {
     quat->q0 = 1.0f;
     quat->q1 = quat->q2 = quat->q3 = 0.0f;
     return;
   }
+
   v.x /= theta;
   v.y /= theta;
   v.z /= theta;
+
   quaternion_from_axis_angle_helper(quat, v, theta);
 }
 
@@ -221,20 +255,7 @@ static inline void quaternion_rotate(fpQuaternion_t *quat, fpVector3_t v)
 {
   fpQuaternion_t r;
   quaternion_from_axis_angle(&r, v);
-  quat->q0 *= r.q0;
-  quat->q1 *= r.q1; 
-  quat->q2 *= r.q2; 
-  quat->q3 *= r.q3;
-
-  // Perform quaternion multiplication
-  /*float q0 = quat->q0;
-  float q1 = quat->q1;
-  float q2 = quat->q2;
-  float q3 = quat->q3;
-  quat->q0 = q0 * r.q0 - q1 * r.q1 - q2 * r.q2 - q3 * r.q3;
-  quat->q1 = q0 * r.q1 + q1 * r.q0 + q2 * r.q3 - q3 * r.q2;
-  quat->q2 = q0 * r.q2 - q1 * r.q3 + q2 * r.q0 + q3 * r.q1;
-  quat->q3 = q0 * r.q3 + q1 * r.q2 - q2 * r.q1 + q3 * r.q0;*/
+  quaternion_multiply_assign(quat, &r);
 }
 
 // populate the supplied rotation matrix equivalent from this quaternion
@@ -331,6 +352,7 @@ static inline void quaternionFromEuler(fpQuaternion_t *q, float roll, float pitc
   q->q3 = cr2 * cp2 * sy2 - sr2 * sp2 * cy2;
 }
 
+// create eulers from a quaternion
 static inline void quaternionToEuler(fpQuaternion_t q, float *roll, float *pitch, float *yaw)
 {
   *roll = atan2_approx(2.0f * (q.q0 * q.q1 + q.q2 * q.q3), 1.0f - 2.0f * (q.q1 * q.q1 + q.q2 * q.q2));
@@ -343,9 +365,11 @@ static inline void quaternionToEuler(fpQuaternion_t q, float *roll, float *pitch
 static inline void quaternionToAxisAngleV(fpQuaternion_t q, fpVector3_t *v)
 {
   const float length = sqrtf(sq(q.q1) + sq(q.q2) + sq(q.q3));
+
   v->x = q.q1;
   v->y = q.q2;
   v->z = q.q3;
+
   if (!is_zero(length))
   {
     v->x /= length;

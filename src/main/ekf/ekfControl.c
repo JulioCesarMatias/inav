@@ -106,7 +106,7 @@ void setWindMagStateLearningMode(void)
 
     // Deny mag calibration request if we aren't using the compass, it has been inhibited by the user,
     // we do not have an absolute position reference or are on the ground (unless explicitly requested by the user)
-    bool magCalDenied = !use_compass() || (magCal == 2) || (onGround && magCal != 4);
+    bool magCalDenied = !ekf_useCompass() || (magCal == 2) || (onGround && magCal != 4);
 
     // Inhibit the magnetic field calibration if not requested or denied
     bool setMagInhibit = !magCalRequested || magCalDenied;
@@ -369,7 +369,7 @@ void checkAttitudeAlignmentStatus(void)
     // submit yaw and magnetic field reset requests depending on whether we have compass data
     if (tiltAlignComplete && !yawAlignComplete)
     {
-        if (use_compass())
+        if (ekf_useCompass())
         {
             magYawResetRequest = true;
             gpsYawResetRequest = false;
@@ -401,9 +401,9 @@ bool readyToUseGPS(void)
 }
 
 // return true if we should use the compass
-bool use_compass(void)
+bool ekf_useCompass(void)
 {
-    return sensors(SENSOR_MAG) && !magSensorFailed;
+    return sensors(SENSOR_MAG) && compassIsCalibrationComplete() && !magSensorFailed;
 }
 
 /*
@@ -470,7 +470,7 @@ bool checkGyroCalStatus(void)
 {
     // check delta angle bias variances
     const float delAngBiasVarMax = sq(RADIANS_TO_DEGREES(0.15f * dtEkfAvg));
-    if (!use_compass())
+    if (!ekf_useCompass())
     {
         // rotate the variances into earth frame and evaluate horizontal terms only as yaw component is poorly observable without a compass
         // which can make this check fail
@@ -500,7 +500,7 @@ void updateFilterStatus(void)
     bool someHorizRefData = !(velTimeout && posTimeout && tasTimeout) || doingFlowNav;
     bool optFlowNavPossible = flowDataValid && delAngBiasLearned;
     bool gpsNavPossible = !gpsNotAvailable && gpsGoodToAlign && delAngBiasLearned;
-    bool filterHealthy = coreHealthy() && tiltAlignComplete && (yawAlignComplete || (!use_compass() && (PV_AidingMode == AID_NONE)));
+    bool filterHealthy = coreHealthy() && tiltAlignComplete && (yawAlignComplete || (!ekf_useCompass() && (PV_AidingMode == AID_NONE)));
     // If GPS height usage is specified, height is considered to be inaccurate until the GPS passes all checks
     bool hgtNotAccurate = (ekfParam._altSource == 2) && !validOrigin;
 

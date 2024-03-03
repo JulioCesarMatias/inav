@@ -170,7 +170,7 @@ bool coreGetAirSpdVec(fpVector3_t *vel)
     }
 
     fpMat3_t Tnb; // rotation from nav to body frame
-    outputDataNew.quat = quaternion_inverse(quaternion_from_rotation_matrix(Tnb));
+    quaternionToRotationMatrix(quaternion_inverse(outputDataNew.quat), &Tnb);
     *vel = multiplyMatrixByVector(Tnb, *vel);
 
     return true;
@@ -391,7 +391,7 @@ void getMagXYZ(fpVector3_t *magXYZ)
 // return true if offsets are valid
 bool getMagOffsets(fpVector3_t *magOffsets)
 {
-    if (!use_compass())
+    if (!ekf_useCompass())
     {
         return false;
     }
