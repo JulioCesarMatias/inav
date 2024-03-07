@@ -46,8 +46,8 @@ void ResetVelocity(void)
     }
     for (uint8_t i = 0; i < imu_buffer_length; i++)
     {
-        storedOutput.buffer[i].velocity.x = ekfStates.stateStruct.velocity.x;
-        storedOutput.buffer[i].velocity.y = ekfStates.stateStruct.velocity.y;
+        storedOutput.buffer.output_buffer[i].velocity.x = ekfStates.stateStruct.velocity.x;
+        storedOutput.buffer.output_buffer[i].velocity.y = ekfStates.stateStruct.velocity.y;
     }
     outputDataNew.velocity.x = ekfStates.stateStruct.velocity.x;
     outputDataNew.velocity.y = ekfStates.stateStruct.velocity.y;
@@ -89,8 +89,8 @@ void ResetPosition(void)
             // correct for antenna position
             gps_elements_t gps_corrected = gpsDataNew;
             // write to state vector and compensate for offset  between last GPS measurement and the EKF time horizon
-            ekfStates.stateStruct.position.x = gps_corrected.pos.x + 0.001f * gps_corrected.vel.x * ((float)(imuDataDelayed.time_ms) - (float)(gps_corrected.time_ms));
-            ekfStates.stateStruct.position.y = gps_corrected.pos.y + 0.001f * gps_corrected.vel.y * ((float)(imuDataDelayed.time_ms) - (float)(gps_corrected.time_ms));
+            ekfStates.stateStruct.position.x = gps_corrected.pos.x + 0.001f * gps_corrected.vel.x * ((float)(imuDataDelayed.time_ms) - (float)(gps_corrected.obs.time_ms));
+            ekfStates.stateStruct.position.y = gps_corrected.pos.y + 0.001f * gps_corrected.vel.y * ((float)(imuDataDelayed.time_ms) - (float)(gps_corrected.obs.time_ms));
             // set the variances using the position measurement noise parameter
             P[6][6] = P[7][7] = sq(MAX(gpsPosAccuracy, ekfParam._gpsHorizPosNoise));
             // clear the timeout flags and counters
@@ -101,8 +101,8 @@ void ResetPosition(void)
 
     for (uint8_t i = 0; i < imu_buffer_length; i++)
     {
-        storedOutput.buffer[i].position.x = ekfStates.stateStruct.position.x;
-        storedOutput.buffer[i].position.y = ekfStates.stateStruct.position.y;
+        storedOutput.buffer.output_buffer[i].position.x = ekfStates.stateStruct.position.x;
+        storedOutput.buffer.output_buffer[i].position.y = ekfStates.stateStruct.position.y;
     }
 
     outputDataNew.position.x = ekfStates.stateStruct.position.x;
@@ -142,7 +142,7 @@ void ResetHeight(void)
     }
     for (uint8_t i = 0; i < imu_buffer_length; i++)
     {
-        storedOutput.buffer[i].position.z = ekfStates.stateStruct.position.z;
+        storedOutput.buffer.output_buffer[i].position.z = ekfStates.stateStruct.position.z;
     }
     vertCompFiltState.pos = ekfStates.stateStruct.position.z;
 
@@ -175,7 +175,7 @@ void ResetHeight(void)
     }
     for (uint8_t i = 0; i < imu_buffer_length; i++)
     {
-        storedOutput.buffer[i].velocity.z = ekfStates.stateStruct.velocity.z;
+        storedOutput.buffer.output_buffer[i].velocity.z = ekfStates.stateStruct.velocity.z;
     }
     outputDataNew.velocity.z = ekfStates.stateStruct.velocity.z;
     outputDataDelayed.velocity.z = ekfStates.stateStruct.velocity.z;
@@ -267,8 +267,8 @@ void SelectVelPosFusion(void)
         // Add the offset to the output observer states
         for (uint8_t i = 0; i < imu_buffer_length; i++)
         {
-            storedOutput.buffer[i].position.x += posResetNE.x;
-            storedOutput.buffer[i].position.y += posResetNE.y;
+            storedOutput.buffer.output_buffer[i].position.x += posResetNE.x;
+            storedOutput.buffer.output_buffer[i].position.y += posResetNE.y;
         }
         outputDataNew.position.x += posResetNE.x;
         outputDataNew.position.y += posResetNE.y;
@@ -296,7 +296,7 @@ void SelectVelPosFusion(void)
             outputDataDelayed.position.z += posResetD;
             for (uint8_t i = 0; i < imu_buffer_length; i++)
             {
-                storedOutput.buffer[i].position.z += posResetD;
+                storedOutput.buffer.output_buffer[i].position.z += posResetD;
             }
 
             // store the time of the reset
@@ -419,7 +419,7 @@ void FuseVelPosNED(void)
         // if vertical GPS velocity data and an independent height source is being used, check to see if the GPS vertical velocity and altimeter
         // innovations have the same sign and are outside limits. If so, then it is likely aliasing is affecting
         // the accelerometers and we should disable the GPS and barometer innovation consistency checks.
-        if (useGpsVertVel && fuseVelData && (ekfParam._altSource != 2))
+        if (useGpsVertVel && fuseVelData && (ekfParam._altSource != HGT_SOURCE_GPS))
         {
             // calculate innovations for height and vertical GPS vel measurements
             float hgtErr = ekfStates.stateStruct.position.z - velPosObs[5];
@@ -792,32 +792,19 @@ void selectHeightForFusion(void)
     readRangeFinder();
     rangeDataToFuse = ekf_ring_buffer_recall(&storedRange, RANGE_RING_BUFFER, &rangeDataDelayed, imuDataDelayed.time_ms);
 
-    // correct range data for the body frame position offset relative to the IMU
-    // the corrected reading is the reading that would have been taken if the sensor was
-    // co-located with the IMU
-    /*if (rangeDataToFuse)
-    {
-        const auto *sensor = _rng->get_backend();
-        fpVector3_t posOffsetBody = sensor->get_pos_offset();
-        if (posOffsetBody.x != 0.0f && posOffsetBody.y != 0.0f && posOffsetBody.z != 0.0f)
-        {
-            fpVector3_t posOffsetEarth = multiplyMatrixTransposeByVector(prevTnb, posOffsetBody);
-            rangeDataDelayed.rng += posOffsetEarth.z / prevTnb.m[2][2];
-        }
-    }*/
-
     // read baro height data from the sensor and check for new data in the buffer
     readBaroData();
     baroDataToFuse = ekf_ring_buffer_recall(&storedBaro, BARO_RING_BUFFER, &baroDataDelayed, imuDataDelayed.time_ms);
 
     bool rangeFinderDataIsFresh = (imuSampleTime_ms - rngValidMeaTime_ms < 500);
+
     // select height source
-    if ((ekfParam._altSource == 1) && rangeFinderDataIsFresh)
+    if ((ekfParam._altSource == HGT_SOURCE_RNG) && rangeFinderDataIsFresh)
     {
         // user has specified the range finder as a primary height source
         activeHgtSource = HGT_SOURCE_RNG;
     }
-    else if ((ekfParam._useRngSwHgt > 0) && ((ekfParam._altSource == 0) || (ekfParam._altSource == 2)) && rangeFinderDataIsFresh)
+    else if ((ekfParam._useRngSwHgt > 0) && ((ekfParam._altSource == HGT_SOURCE_BARO) || (ekfParam._altSource == HGT_SOURCE_GPS)) && rangeFinderDataIsFresh)
     {
         // determine if we are above or below the height switch region
         float rangeMaxUse = 1e-4f * rangeFinderMaxAltitude() * (float)ekfParam._useRngSwHgt;
@@ -840,11 +827,11 @@ void selectHeightForFusion(void)
         if ((aboveUpperSwHgt || dontTrustTerrain) && (activeHgtSource == HGT_SOURCE_RNG))
         {
             // cannot trust terrain or range finder so stop using range finder height
-            if (ekfParam._altSource == 0)
+            if (ekfParam._altSource == HGT_SOURCE_BARO)
             {
                 activeHgtSource = HGT_SOURCE_BARO;
             }
-            else if (ekfParam._altSource == 2)
+            else if (ekfParam._altSource == HGT_SOURCE_GPS)
             {
                 activeHgtSource = HGT_SOURCE_GPS;
             }
@@ -855,11 +842,11 @@ void selectHeightForFusion(void)
             activeHgtSource = HGT_SOURCE_RNG;
         }
     }
-    else if (ekfParam._altSource == 0)
+    else if (ekfParam._altSource == HGT_SOURCE_BARO)
     {
         activeHgtSource = HGT_SOURCE_BARO;
     }
-    else if ((ekfParam._altSource == 2) && ((imuSampleTime_ms - lastTimeGpsReceived_ms) < 500) && validOrigin && gpsAccuracyGood)
+    else if ((ekfParam._altSource == HGT_SOURCE_GPS) && ((imuSampleTime_ms - lastTimeGpsReceived_ms) < 500) && validOrigin && gpsAccuracyGood)
     {
         activeHgtSource = HGT_SOURCE_GPS;
     }
@@ -867,6 +854,7 @@ void selectHeightForFusion(void)
     // Use Baro alt as a fallback if we lose range finder or GPS
     bool lostRngHgt = ((activeHgtSource == HGT_SOURCE_RNG) && (!rangeFinderDataIsFresh));
     bool lostGpsHgt = ((activeHgtSource == HGT_SOURCE_GPS) && ((imuSampleTime_ms - lastTimeGpsReceived_ms) > 2000));
+    
     if (lostRngHgt || lostGpsHgt)
     {
         activeHgtSource = HGT_SOURCE_BARO;
@@ -895,8 +883,8 @@ void selectHeightForFusion(void)
     // combined local NED position height and origin height remains consistent with the GPS altitude
     // This also enables the GPS height to be used as a backup height source
     if (gpsDataToFuse &&
-        (((ekfParam._originHgtMode & (1 << 0)) && (activeHgtSource == HGT_SOURCE_BARO)) ||
-         ((ekfParam._originHgtMode & (1 << 1)) && (activeHgtSource == HGT_SOURCE_RNG))))
+        (((ekfParam._originHgtMode & (1 << HGT_SOURCE_BARO)) && (activeHgtSource == HGT_SOURCE_BARO)) ||
+         ((ekfParam._originHgtMode & (1 << HGT_SOURCE_RNG)) && (activeHgtSource == HGT_SOURCE_RNG))))
     {
         correctEkfOriginHeight();
     }

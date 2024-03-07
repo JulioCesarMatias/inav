@@ -14,8 +14,8 @@
 
 // Length of FIFO buffers used for non-IMU sensor data.
 // Must be larger than the time period defined by IMU_BUFFER_LENGTH
-static const uint32_t OBS_BUFFER_LENGTH = 5;
-static const uint32_t FLOW_BUFFER_LENGTH = 15;
+#define OBS_BUFFER_LENGTH 5
+#define FLOW_BUFFER_LENGTH 15
 
 // Variables
 bool statesInitialised; // boolean true when filter states have been initialised
@@ -32,6 +32,7 @@ Matrix24 KHP;                   // intermediate result used for covariance updat
 Matrix24 nextP;                 // Predicted covariance matrix before addition of process noise to diagonals
 Vector28 Kfusion;               // intermediate fusion vector
 Matrix24 P;                     // covariance matrix
+
 float gpsNoiseScaler;           // Used to scale the GPS measurement noise and consistency gates to compensate for operation with small satellite counts
 ekf_imu_buffer storedIMU;       // IMU data buffer
 ekf_ring_buffer storedGPS;      // GPS data buffer
@@ -39,7 +40,7 @@ ekf_ring_buffer storedMag;      // Magnetometer data buffer
 ekf_ring_buffer storedBaro;     // Baro data buffer
 ekf_ring_buffer storedTAS;      // TAS data buffer
 ekf_ring_buffer storedRange;    // Range finder data buffer
-ekf_output_buffer storedOutput; // output state buffer
+ekf_imu_buffer storedOutput;    // output state buffer
 uint8_t imu_buffer_length;
 fpMat3_t prevTnb;                     // previous nav to body transformation used for INS earth rotation compensation
 float accNavMag;                      // magnitude of navigation accel - used to adjust GPS obs variance (m/s^2)
@@ -266,7 +267,7 @@ faultStatus_t faultStatus;
 mag_state_t mag_state;
 
 // string for using EKF messages in the OSD
-char osd_ekf_status_string[50];
+char ekf_status_string[50];
 
 // earth field from WMM tables
 bool have_table_earth_field;      // true when we have initialised table_earth_field_ga
@@ -287,16 +288,22 @@ bool EKFGSF_run_filterbank;           // true when the filter bank is active
 
 ekfStates_U ekfStates;
 
-// setup this core backend
-bool setup_core(void)
+bool setup_backend(void)
 {
+    // if the last buffer is successfully allocated, avoid running this void more than once
+    if (storedOutput.buffer.output_buffer != NULL) 
+    {
+        return true;
+    }
+
+    strcpy(ekf_status_string, "EKF enabled");
+
     /*
-      the imu_buffer_length needs to cope with a 260ms delay at a
-      maximum fusion rate of 100Hz. Non-imu data coming in at faster
-      than 100Hz is downsampled. For 50Hz main loop rate we need a
-      shorter buffer.
+      The imu_buffer_length needs to cope with a 260ms delay at a maximum fusion rate of 100Hz.
+      Non-imu data coming in at faster than 100Hz is downsampled.
+      For 50Hz main loop rate we need a shorter buffer.
      */
-    if (ekfParam._frameTimeUsec < 100)
+    if (ekfParam._imuTimeHz < 100)
     {
         imu_buffer_length = 13;
     }
@@ -326,22 +333,22 @@ bool setup_core(void)
         return false;
     }
 
-    if (!ekf_ring_buffer_init_size(&storedOF, OPTFLOW_RING_BUFFER, FLOW_BUFFER_LENGTH, sizeof(of_elements_t)))
-    {
-        return false;
-    }
-
     if (!ekf_ring_buffer_init_size(&storedRange, RANGE_RING_BUFFER, OBS_BUFFER_LENGTH, sizeof(range_elements_t)))
     {
         return false;
     }
 
-    if (!ekf_imu_buffer_init_size(&storedIMU, imu_buffer_length, sizeof(imu_elements_t)))
+    if (!ekf_ring_buffer_init_size(&storedOF, OPTFLOW_RING_BUFFER, FLOW_BUFFER_LENGTH, sizeof(of_elements_t)))
     {
         return false;
     }
 
-    if (!ekf_output_buffer_init_size(&storedOutput, imu_buffer_length, sizeof(output_elements_t)))
+    if (!ekf_imu_buffer_init_size(&storedIMU, IMU_RING_BUFFER, imu_buffer_length, sizeof(imu_elements_t)))
+    {
+        return false;
+    }
+
+    if (!ekf_imu_buffer_init_size(&storedOutput, OUTPUT_RING_BUFFER, imu_buffer_length, sizeof(output_elements_t)))
     {
         return false;
     }
@@ -353,7 +360,7 @@ bool setup_core(void)
 void InitialiseVariables(void)
 {
     // calculate the nominal filter update rate
-    localFilterTimeStep_ms = (uint8_t)(1000.0f * (1.0f / (float)ekfParam._frameTimeUsec));
+    localFilterTimeStep_ms = (uint8_t)(1000.0f * (1.0f / (float)ekfParam._imuTimeHz));
     localFilterTimeStep_ms = MAX(localFilterTimeStep_ms, 10);
 
     // initialise time stamps
@@ -453,7 +460,7 @@ void InitialiseVariables(void)
     gpsDriftNE = 0.0f;
     gpsVertVelFilt = 0.0f;
     gpsHorizVelFilt = 0.0f;
-    ZERO_FARRAY(ekfStates.statesArray);
+    memset(&ekfStates.statesArray, 0, sizeof(ekfStates.statesArray));
     memset(&vertCompFiltState, 0, sizeof(vertCompFiltState));
     posVelFusionDelayed = false;
     optFlowFusionDelayed = false;
@@ -476,30 +483,30 @@ void InitialiseVariables(void)
     quaternionInitialise(&ekfStates.stateStruct.quat);
     quatAtLastMagReset = ekfStates.stateStruct.quat;
     delAngBiasLearned = false;
-    memset(&filterStatus, 0, sizeof(filterStatus));
     activeHgtSource = 0;
+    memset(&filterStatus, 0, sizeof(filterStatus));
     memset(&rngMeasIndex, 0, sizeof(rngMeasIndex));
     memset(&storedRngMeasTime_ms, 0, sizeof(storedRngMeasTime_ms));
     memset(&storedRngMeas, 0, sizeof(storedRngMeas));
+    ZERO_FARRAY(velPosObs);
     terrainHgtStable = true;
     ekfOriginHgtVar = 0.0f;
     ekfGpsRefHgt = 0.0;
-    ZERO_FARRAY(velPosObs);
 
     // zero data buffers
-    ekf_imu_buffer_reset(&storedIMU);
+    ekf_imu_buffer_reset(&storedIMU, IMU_RING_BUFFER);
     ekf_ring_buffer_reset(&storedGPS);
     ekf_ring_buffer_reset(&storedBaro);
     ekf_ring_buffer_reset(&storedTAS);
     ekf_ring_buffer_reset(&storedRange);
-    ekf_output_buffer_reset(&storedOutput);
+    ekf_imu_buffer_reset(&storedOutput, OUTPUT_RING_BUFFER);
 
     // now init mag variables
     yawAlignComplete = false;
     have_table_earth_field = false;
 
     // initialise pre-arm message
-    strcpy(osd_ekf_status_string, "EKF still initialising");
+    strcpy(ekf_status_string, "EKF still initialising");
 
     InitialiseVariablesMag();
 
@@ -510,9 +517,7 @@ void InitialiseVariables(void)
     EKFGSF_run_filterbank = false;
 }
 
-/*
-  separate out the mag reset so it can be used when compass learning completes
- */
+// separate out the mag reset so it can be used when compass learning completes
 void InitialiseVariablesMag(void)
 {
     lastHealthyMagTime_ms = imuSampleTime_ms;
@@ -544,7 +549,7 @@ bool coreInitialiseFilterBootstrap(void)
     // If we are a plane and don't have GPS lock then don't initialise
     if (assume_zero_sideslip() && gpsSol.fixType < GPS_FIX_3D)
     {
-        strcpy(osd_ekf_status_string, "EKF init failure: No GPS lock");
+        strcpy(ekf_status_string, "EKF init failure: No GPS lock");
         statesInitialised = false;
         return false;
     }
@@ -565,9 +570,9 @@ bool coreInitialiseFilterBootstrap(void)
     InitialiseVariables();
 
     // Initialise IMU data
-    dtIMUavg = 1.0f / (float)ekfParam._frameTimeUsec;
+    dtIMUavg = 1.0f / (float)ekfParam._imuTimeHz;
     readIMUData();
-    ekf_imu_buffer_reset_history(&storedIMU, &imuDataNew);
+    ekf_imu_buffer_reset_history(&storedIMU, &imuDataNew, IMU_RING_BUFFER);
     imuDataDelayed = imuDataNew;
 
     // acceleration vector in XYZ body axes measured by the IMU (m/s^2)
@@ -577,7 +582,7 @@ bool coreInitialiseFilterBootstrap(void)
     // convert the accel in body frame in cm/s to m/s
     initAccVec.x = CENTIMETERS_TO_METERS(initAccVec.x);
     initAccVec.y = CENTIMETERS_TO_METERS(initAccVec.y);
-    initAccVec.z = CENTIMETERS_TO_METERS(initAccVec.z);
+    initAccVec.z = -CENTIMETERS_TO_METERS(initAccVec.z);
 
     // read the magnetometer data
     readMagData();
@@ -590,10 +595,10 @@ bool coreInitialiseFilterBootstrap(void)
         vectorNormalize(&initAccVec, &initAccVec);
 
         // calculate initial pitch angle
-        pitch = asinf(initAccVec.x);
+        pitch = asinf(-initAccVec.x);
 
         // calculate initial roll angle
-        roll = atan2f(initAccVec.y, initAccVec.z);
+        roll = atan2f(initAccVec.y, -initAccVec.z);
     }
 
     // calculate initial roll and pitch orientation
@@ -650,32 +655,40 @@ void CovarianceInit(void)
     P[0][0] = 0.1f;
     P[1][1] = 0.1f;
     P[2][2] = 0.1f;
+
     // velocities
     P[3][3] = sq(ekfParam._gpsHorizVelNoise);
     P[4][4] = P[3][3];
     P[5][5] = sq(ekfParam._gpsVertVelNoise);
+
     // positions
     P[6][6] = sq(ekfParam._gpsHorizPosNoise);
     P[7][7] = P[6][6];
     P[8][8] = sq(ekfParam._baroAltNoise);
+
     // gyro delta angle biases
     P[9][9] = sq(RADIANS_TO_DEGREES(InitialGyroBiasUncertainty() * dtEkfAvg));
     P[10][10] = P[9][9];
     P[11][11] = P[9][9];
+
     // gyro scale factor biases
     P[12][12] = sq(1e-3);
     P[13][13] = P[12][12];
     P[14][14] = P[12][12];
+
     // Z delta velocity bias
     P[15][15] = sq(INIT_ACCEL_BIAS_UNCERTAINTY * dtEkfAvg);
+
     // earth magnetic field
     P[16][16] = 0.0f;
     P[17][17] = P[16][16];
     P[18][18] = P[16][16];
+
     // body magnetic field
     P[19][19] = 0.0f;
     P[20][20] = P[19][19];
     P[21][21] = P[19][19];
+    
     // wind velocities
     P[22][22] = 0.0f;
     P[23][23] = P[22][22];
@@ -761,7 +774,7 @@ void coreUpdateFilter(bool predict)
     if (filterStatus.value == 0 && last_filter_ok_ms != 0 && millis() - last_filter_ok_ms > 5000 && !get_armed())
     {
         // we've been unhealthy for 5 seconds after being healthy, reset the filter
-        strcpy(osd_ekf_status_string, "EKF IMU forced reset");
+        strcpy(ekf_status_string, "EKF IMU forced reset");
         last_filter_ok_ms = 0;
         statesInitialised = false;
         coreInitialiseFilterBootstrap();
@@ -955,7 +968,7 @@ void calcOutputStates(void)
         {
             scaler = 2.0f;
         }
-        else 
+        else
         {
             scaler = -2.0f;
         }
@@ -1634,7 +1647,7 @@ void StoreQuatRotate(fpQuaternion_t *deltaQuat)
     // write current measurement to entire table
     for (uint8_t i = 0; i < imu_buffer_length; i++)
     {
-        quaternion_multiply_assign(&storedOutput.buffer[i].quat, deltaQuat);
+        quaternion_multiply_assign(&storedOutput.buffer.output_buffer[i].quat, deltaQuat);
     }
 
     quaternion_multiply_assign(&outputDataDelayed.quat, deltaQuat);
@@ -1869,12 +1882,15 @@ fpQuaternion_t calcQuatAndFieldStates(float roll, float pitch)
 void zeroAttCovOnly(void)
 {
     float varTemp[3];
+
     for (uint8_t index = 0; index <= 2; index++)
     {
         varTemp[index] = P[index][index];
     }
+
     zeroCols(P, 0, 2);
     zeroRows(P, 0, 2);
+
     for (uint8_t index = 0; index <= 2; index++)
     {
         P[index][index] = varTemp[index];

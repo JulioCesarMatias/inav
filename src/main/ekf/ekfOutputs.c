@@ -47,7 +47,7 @@ bool getHeightControlLimit(float *height)
         // If are doing optical flow nav, ensure the height above ground is within range finder limits after accounting for vehicle tilt and control errors
         *height = MAX(rangeFinderMaxAltitude() * 0.007f - 1.0f, 1.0f);
         // If we are are not using the range finder as the height reference, then compensate for the difference between terrain and EKF origin
-        if (ekfParam._altSource != 1)
+        if (ekfParam._altSource != HGT_SOURCE_RNG)
         {
             *height -= terrainState;
         }
@@ -250,7 +250,7 @@ bool coreGetPosD(float *posD)
     // The EKF always has a height estimate regardless of mode of operation
     // Correct for the IMU offset in body frame (EKF calculations are at the IMU)
     // Also correct for changes to the origin height
-    if ((ekfParam._originHgtMode & (1 << 2)) == 0)
+    if ((ekfParam._originHgtMode & (1 << HGT_SOURCE_GPS)) == 0)
     {
         // Any sensor height drift corrections relative to the WGS-84 reference are applied to the origin.
         *posD = outputDataNew.position.z;
@@ -363,7 +363,7 @@ bool getOriginLLH(gpsLocation_t *loc)
     {
         *loc = EKF_origin;
         // report internally corrected reference height if enabled
-        if ((ekfParam._originHgtMode & (1 << 2)) == 0)
+        if ((ekfParam._originHgtMode & (1 << HGT_SOURCE_GPS)) == 0)
         {
             loc->alt = (int32_t)(100.0f * ekfGpsRefHgt);
         }

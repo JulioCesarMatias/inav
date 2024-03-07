@@ -1,6 +1,6 @@
 #include "ekf/ekfBuffer.h"
 
-bool init_buffer_parent(ekf_ring_buffer *buffer, uint8_t sensor_buffer_num)
+static bool init_buffer_parent(ekf_ring_buffer *buffer, uint8_t sensor_buffer_num)
 {
     bool ret;
 
@@ -63,6 +63,7 @@ bool init_buffer_parent(ekf_ring_buffer *buffer, uint8_t sensor_buffer_num)
 
     return ret;
 }
+
 bool ekf_ring_buffer_init_size(ekf_ring_buffer *buffer, uint8_t sensor_buffer_num, uint8_t _size, uint8_t _elsize)
 {
     buffer->size = _size;
@@ -78,71 +79,66 @@ bool ekf_ring_buffer_init_size(ekf_ring_buffer *buffer, uint8_t sensor_buffer_nu
     return true;
 }
 
-void *get_offset(ekf_ring_buffer *buffer, uint8_t sensor_buffer_num)
+static uint32_t ekf_ring_buffer_time_ms(ekf_ring_buffer *buffer, uint8_t sensor_buffer_num)
 {
+    EKF_obs_element_t *el;
+
     switch (sensor_buffer_num)
     {
     case GPS_RING_BUFFER:
-        return (void *)(((uint8_t *)buffer->buffer.gps_buffer) + buffer->oldest * (uint32_t)buffer->elsize);
+        el = (EKF_obs_element_t *)(((uint8_t *)buffer->buffer.gps_buffer) + buffer->oldest * buffer->elsize);
         break;
 
     case MAG_RING_BUFFER:
-        return (void *)(((uint8_t *)buffer->buffer.mag_buffer) + buffer->oldest * (uint32_t)buffer->elsize);
+        el = (EKF_obs_element_t *)(((uint8_t *)buffer->buffer.mag_buffer) + buffer->oldest * buffer->elsize);
         break;
 
     case BARO_RING_BUFFER:
-        return (void *)(((uint8_t *)buffer->buffer.baro_buffer) + buffer->oldest * (uint32_t)buffer->elsize);
+        el = (EKF_obs_element_t *)(((uint8_t *)buffer->buffer.baro_buffer) + buffer->oldest * buffer->elsize);
         break;
 
     case RANGE_RING_BUFFER:
-        return (void *)(((uint8_t *)buffer->buffer.range_buffer) + buffer->oldest * (uint32_t)buffer->elsize);
+        el = (EKF_obs_element_t *)(((uint8_t *)buffer->buffer.range_buffer) + buffer->oldest * buffer->elsize);
         break;
 
     case TAS_RING_BUFFER:
-        return (void *)(((uint8_t *)buffer->buffer.tas_buffer) + buffer->oldest * (uint32_t)buffer->elsize);
+        el = (EKF_obs_element_t *)(((uint8_t *)buffer->buffer.tas_buffer) + buffer->oldest * buffer->elsize);
         break;
 
     case OPTFLOW_RING_BUFFER:
-        return (void *)(((uint8_t *)buffer->buffer.of_buffer) + buffer->oldest * (uint32_t)buffer->elsize);
+        el = (EKF_obs_element_t *)(((uint8_t *)buffer->buffer.of_buffer) + buffer->oldest * buffer->elsize);
         break;
     }
-
-    return NULL;
-}
-
-uint32_t ekf_ring_buffer_time_ms(ekf_ring_buffer *buffer, uint8_t sensor_buffer_num)
-{
-    EKF_obs_element_t *el = (EKF_obs_element_t *)get_offset(buffer, sensor_buffer_num);
 
     return el->time_ms;
 }
 
-void select_buffer_recall(ekf_ring_buffer *buffer, void *element, uint8_t sensor_buffer_num)
+static void select_buffer_recall(ekf_ring_buffer *buffer, void *element, uint8_t sensor_buffer_num)
 {
     switch (sensor_buffer_num)
     {
     case GPS_RING_BUFFER:
-        memcpy(element, (void *)(((uint8_t *)buffer->buffer.gps_buffer) + buffer->oldest * (uint32_t)buffer->elsize), buffer->elsize);
+        memcpy(element, (((uint8_t *)buffer->buffer.gps_buffer) + buffer->oldest * buffer->elsize), buffer->elsize);
         break;
 
     case MAG_RING_BUFFER:
-        memcpy(element, (void *)(((uint8_t *)buffer->buffer.mag_buffer) + buffer->oldest * (uint32_t)buffer->elsize), buffer->elsize);
+        memcpy(element, (((uint8_t *)buffer->buffer.mag_buffer) + buffer->oldest * buffer->elsize), buffer->elsize);
         break;
 
     case BARO_RING_BUFFER:
-        memcpy(element, (void *)(((uint8_t *)buffer->buffer.baro_buffer) + buffer->oldest * (uint32_t)buffer->elsize), buffer->elsize);
+        memcpy(element, (((uint8_t *)buffer->buffer.baro_buffer) + buffer->oldest * buffer->elsize), buffer->elsize);
         break;
 
     case RANGE_RING_BUFFER:
-        memcpy(element, (void *)(((uint8_t *)buffer->buffer.range_buffer) + buffer->oldest * (uint32_t)buffer->elsize), buffer->elsize);
+        memcpy(element, (((uint8_t *)buffer->buffer.range_buffer) + buffer->oldest * buffer->elsize), buffer->elsize);
         break;
 
     case TAS_RING_BUFFER:
-        memcpy(element, (void *)(((uint8_t *)buffer->buffer.tas_buffer) + buffer->oldest * (uint32_t)buffer->elsize), buffer->elsize);
+        memcpy(element, (((uint8_t *)buffer->buffer.tas_buffer) + buffer->oldest * buffer->elsize), buffer->elsize);
         break;
 
     case OPTFLOW_RING_BUFFER:
-        memcpy(element, (void *)(((uint8_t *)buffer->buffer.of_buffer) + buffer->oldest * (uint32_t)buffer->elsize), buffer->elsize);
+        memcpy(element, (((uint8_t *)buffer->buffer.of_buffer) + buffer->oldest * buffer->elsize), buffer->elsize);
         break;
     }
 }
@@ -172,7 +168,7 @@ bool ekf_ring_buffer_recall(ekf_ring_buffer *buffer, uint8_t sensor_buffer_num, 
     return ret;
 }
 
-bool select_buffer_push(ekf_ring_buffer *buffer, const void *element, uint8_t sensor_buffer_num)
+static bool select_buffer_push(ekf_ring_buffer *buffer, const void *element, uint8_t sensor_buffer_num)
 {
     bool ret;
 
@@ -182,32 +178,32 @@ bool select_buffer_push(ekf_ring_buffer *buffer, const void *element, uint8_t se
     {
     case GPS_RING_BUFFER:
         ret = buffer->buffer.gps_buffer == NULL ? false : true;
-        memcpy((void *)(((uint8_t *)buffer->buffer.gps_buffer) + head * (uint32_t)buffer->elsize), element, buffer->elsize);
+        memcpy((((uint8_t *)buffer->buffer.gps_buffer) + head * buffer->elsize), element, buffer->elsize);
         break;
 
     case MAG_RING_BUFFER:
         ret = buffer->buffer.mag_buffer == NULL ? false : true;
-        memcpy((void *)(((uint8_t *)buffer->buffer.mag_buffer) + head * (uint32_t)buffer->elsize), element, buffer->elsize);
+        memcpy((((uint8_t *)buffer->buffer.mag_buffer) + head * buffer->elsize), element, buffer->elsize);
         break;
 
     case BARO_RING_BUFFER:
         ret = buffer->buffer.baro_buffer == NULL ? false : true;
-        memcpy((void *)(((uint8_t *)buffer->buffer.baro_buffer) + head * (uint32_t)buffer->elsize), element, buffer->elsize);
+        memcpy((((uint8_t *)buffer->buffer.baro_buffer) + head * buffer->elsize), element, buffer->elsize);
         break;
 
     case RANGE_RING_BUFFER:
         ret = buffer->buffer.range_buffer == NULL ? false : true;
-        memcpy((void *)(((uint8_t *)buffer->buffer.range_buffer) + head * (uint32_t)buffer->elsize), element, buffer->elsize);
+        memcpy((((uint8_t *)buffer->buffer.range_buffer) + head * buffer->elsize), element, buffer->elsize);
         break;
 
     case TAS_RING_BUFFER:
         ret = buffer->buffer.tas_buffer == NULL ? false : true;
-        memcpy((void *)(((uint8_t *)buffer->buffer.tas_buffer) + head * (uint32_t)buffer->elsize), element, buffer->elsize);
+        memcpy((((uint8_t *)buffer->buffer.tas_buffer) + head * buffer->elsize), element, buffer->elsize);
         break;
 
     case OPTFLOW_RING_BUFFER:
         ret = buffer->buffer.of_buffer == NULL ? false : true;
-        memcpy((void *)(((uint8_t *)buffer->buffer.of_buffer) + head * (uint32_t)buffer->elsize), element, buffer->elsize);
+        memcpy((((uint8_t *)buffer->buffer.of_buffer) + head * buffer->elsize), element, buffer->elsize);
         break;
     }
 
@@ -237,40 +233,81 @@ void ekf_ring_buffer_reset(ekf_ring_buffer *buffer)
     buffer->oldest = 0;
 }
 
-bool ekf_imu_buffer_init_size(ekf_imu_buffer *buffer, uint32_t size, uint8_t _elsize)
+static bool init_imu_buffer_parent(ekf_imu_buffer *buffer, uint8_t sensor_buffer_num)
 {
-    if (buffer->buffer != NULL)
+    bool ret;
+
+    switch (sensor_buffer_num)
     {
-        free(buffer->buffer);
+    case IMU_RING_BUFFER:
+        if (buffer->buffer.imu_buffer != NULL)
+        {
+            free(buffer->buffer.imu_buffer);
+        }
+        buffer->buffer.imu_buffer = calloc(buffer->size, buffer->elsize);
+        ret = buffer->buffer.imu_buffer == NULL ? false : true;
+        break;
+
+    case OUTPUT_RING_BUFFER:
+        if (buffer->buffer.output_buffer != NULL)
+        {
+            free(buffer->buffer.output_buffer);
+        }
+        buffer->buffer.output_buffer = calloc(buffer->size, buffer->elsize);
+        ret = buffer->buffer.output_buffer == NULL ? false : true;
+        break;
     }
 
-    buffer->elsize = _elsize;
-    buffer->buffer = calloc(size, buffer->elsize);
+    return ret;
+}
 
-    if (buffer->buffer == NULL)
+bool ekf_imu_buffer_init_size(ekf_imu_buffer *buffer, uint8_t sensor_buffer_num, uint8_t size, uint8_t _elsize)
+{
+
+    buffer->elsize = _elsize;
+    buffer->size = size;
+
+    if (!init_imu_buffer_parent(buffer, sensor_buffer_num))
     {
         return false;
     }
 
-    buffer->size = size;
     buffer->youngest = 0;
     buffer->oldest = 0;
 
     return true;
 }
 
-void ekf_imu_buffer_push_youngest_element(ekf_imu_buffer *buffer, imu_elements_t *element)
+static bool select_imu_buffer_push(ekf_imu_buffer *buffer, const void *element, uint8_t sensor_buffer_num)
 {
-    if (buffer->buffer == NULL)
+    bool ret;
+
+    switch (sensor_buffer_num)
+    {
+    case IMU_RING_BUFFER:
+        ret = buffer->buffer.imu_buffer == NULL ? false : true;
+        buffer->youngest = (buffer->youngest + 1) % buffer->size;
+        memcpy((((uint8_t *)buffer->buffer.imu_buffer) + buffer->youngest * buffer->elsize), element, buffer->elsize);
+        buffer->oldest = (buffer->youngest + 1) % buffer->size;
+        break;
+
+    case OUTPUT_RING_BUFFER:
+        ret = buffer->buffer.imu_buffer == NULL ? false : true;
+        buffer->youngest = (buffer->youngest + 1) % buffer->size;
+        memcpy((((uint8_t *)buffer->buffer.imu_buffer) + buffer->youngest * buffer->elsize), element, buffer->elsize);
+        buffer->oldest = (buffer->youngest + 1) % buffer->size;
+        break;
+    }
+
+    return ret;
+}
+
+void ekf_imu_buffer_push_youngest_element(ekf_imu_buffer *buffer, imu_elements_t *element, uint8_t sensor_buffer_num)
+{
+    if (!select_imu_buffer_push(buffer, element, sensor_buffer_num))
     {
         return;
     }
-
-    buffer->youngest = (buffer->youngest + 1) % buffer->size;
-
-    memcpy((void *)(((uint8_t *)buffer->buffer) + buffer->youngest * (uint32_t)buffer->elsize), element, buffer->elsize);
-
-    buffer->oldest = (buffer->youngest + 1) % buffer->size;
 
     if (buffer->oldest == 0)
     {
@@ -283,63 +320,55 @@ bool ekf_imu_buffer_is_filled(const ekf_imu_buffer *buffer)
     return buffer->filled;
 }
 
-void ekf_imu_buffer_get_oldest_element(const ekf_imu_buffer *buffer, imu_elements_t *element)
+void ekf_imu_buffer_get_oldest_element(const ekf_imu_buffer *buffer, imu_elements_t *element, uint8_t sensor_buffer_num)
 {
-    if (buffer->buffer == NULL)
+    switch (sensor_buffer_num)
     {
-        memset(element, 0, buffer->elsize);
-    }
-    else
-    {
-        memcpy(element, (void *)(((uint8_t *)buffer->buffer) + buffer->oldest * (uint32_t)buffer->elsize), buffer->elsize);
+    case IMU_RING_BUFFER:
+        buffer->buffer.imu_buffer == NULL ? memset(element, 0, buffer->elsize) : memcpy(element, (((uint8_t *)buffer->buffer.imu_buffer) + buffer->oldest * buffer->elsize), buffer->elsize);
+        break;
+
+    case OUTPUT_RING_BUFFER:
+        buffer->buffer.output_buffer == NULL ? memset(element, 0, buffer->elsize) : memcpy(element, (((uint8_t *)buffer->buffer.output_buffer) + buffer->oldest * buffer->elsize), buffer->elsize);
+        break;
     }
 }
 
-void ekf_imu_buffer_reset_history(ekf_imu_buffer *buffer, imu_elements_t *element)
+void ekf_imu_buffer_reset_history(ekf_imu_buffer *buffer, imu_elements_t *element, uint8_t sensor_buffer_num)
 {
     for (uint8_t index = 0; index < buffer->size; index++)
     {
-        memcpy((void *)(((uint8_t *)buffer->buffer) + index * (uint32_t)buffer->elsize), element, buffer->elsize);
+        switch (sensor_buffer_num)
+        {
+        case IMU_RING_BUFFER:
+            memcpy((((uint8_t *)buffer->buffer.imu_buffer) + index * buffer->elsize), element, buffer->elsize);
+            break;
+
+        case OUTPUT_RING_BUFFER:
+            memcpy((((uint8_t *)buffer->buffer.output_buffer) + index * buffer->elsize), element, buffer->elsize);
+            break;
+        }
     }
 }
 
-void ekf_imu_buffer_reset(ekf_imu_buffer *buffer)
+void ekf_imu_buffer_reset(ekf_imu_buffer *buffer, uint8_t sensor_buffer_num)
 {
     buffer->youngest = 0;
     buffer->oldest = 0;
-    memset(buffer->buffer, 0, buffer->size * buffer->elsize);
-}
 
-bool ekf_output_buffer_init_size(ekf_output_buffer *buffer, uint32_t size, uint8_t _elsize)
-{
-    if (buffer->buffer != NULL)
+    switch (sensor_buffer_num)
     {
-        free(buffer->buffer);
+    case IMU_RING_BUFFER:
+        memset(buffer->buffer.imu_buffer, 0, buffer->size * buffer->elsize);
+        break;
+
+    case OUTPUT_RING_BUFFER:
+        memset(buffer->buffer.output_buffer, 0, buffer->size * buffer->elsize);
+        break;
     }
-
-    buffer->elsize = _elsize;
-    buffer->buffer = calloc(size, buffer->elsize);
-
-    if (buffer->buffer == NULL)
-    {
-        return false;
-    }
-
-    buffer->size = size;
-    buffer->youngest = 0;
-    buffer->oldest = 0;
-
-    return true;
 }
 
-void ekf_output_buffer_reset(ekf_output_buffer *buffer)
+output_elements_t *ekf_output_buffer_get(const ekf_imu_buffer *buffer, uint8_t index)
 {
-    buffer->youngest = 0;
-    buffer->oldest = 0;
-    memset(buffer->buffer, 0, buffer->size * (uint32_t)buffer->elsize);
-}
-
-output_elements_t *ekf_output_buffer_get(const ekf_output_buffer *buffer, uint8_t index)
-{
-    return (void *)(((uint8_t *)buffer->buffer) + index * (uint32_t)buffer->elsize);
+    return (output_elements_t *)(((uint8_t *)buffer->buffer.output_buffer) + index * buffer->elsize);
 }

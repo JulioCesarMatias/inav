@@ -211,22 +211,6 @@ void EKFGSF_yaw_update(const fpVector3_t delAng,
 
     GSF.yaw = atan2f(yaw_vector.v[1], yaw_vector.v[0]);
 
-    // Example for future reference showing how a full GSF covariance matrix could be calculated if required
-    /*
-    memset(&GSF.P, 0, sizeof(GSF.P));
-    for (uint8_t mdl_idx = 0; mdl_idx < N_MODELS_EKFGSF; mdl_idx++) {
-        float delta[3];
-        for (uint8_t row = 0; row < 3; row++) {
-            delta[row] = EKF[mdl_idx].X[row] - GSF.X[row];
-        }
-        for (uint8_t row = 0; row < 3; row++) {
-            for (uint8_t col = 0; col < 3; col++) {
-                GSF.P[row][col] +=  GSF.weights[mdl_idx] * (EKF[mdl_idx].P[row][col] + delta[row] * delta[col]);
-            }
-        }
-    }
-    */
-
     GSF.yaw_variance = 0.0f;
     for (uint8_t mdl_idx = 0; mdl_idx < N_MODELS_EKFGSF; mdl_idx++)
     {

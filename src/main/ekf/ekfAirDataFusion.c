@@ -209,7 +209,7 @@ void SelectTasFusion(void)
     readAirSpdData();
 
     // If we haven't received airspeed data for a while, then declare the airspeed data as being timed out
-    if (imuSampleTime_ms - tasDataNew.time_ms > ekfParam.tasRetryTime_ms)
+    if (imuSampleTime_ms - tasDataNew.obs.time_ms > ekfParam.tasRetryTime_ms)
     {
         tasTimeout = true;
     }

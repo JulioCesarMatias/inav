@@ -67,7 +67,7 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (gpsDriftFail)
     {
-        strcpy(osd_ekf_status_string, "EKF GPS drift");
+        strcpy(ekf_status_string, "EKF GPS drift");
     }
 
     // Check that the vertical GPS vertical velocity is reasonable after noise filtering
@@ -88,7 +88,7 @@ void calcGpsGoodToAlign(void)
     if (gpsVertVelFail)
     {
 
-        strcpy(osd_ekf_status_string, "EKF GPS vertical speed fail");
+        strcpy(ekf_status_string, "EKF GPS vertical speed fail");
     }
 
     // Check that the horizontal GPS vertical velocity is reasonable after noise filtering
@@ -108,7 +108,7 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (gpsHorizVelFail)
     {
-        strcpy(osd_ekf_status_string, "EKF GPS horizontal speed fail");
+        strcpy(ekf_status_string, "EKF GPS horizontal speed fail");
     }
 
     // fail if horiziontal position accuracy not sufficient
@@ -126,7 +126,7 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (hAccFail)
     {
-        strcpy(osd_ekf_status_string, "EKF GPS horizontal acc error");
+        strcpy(ekf_status_string, "EKF GPS horizontal acc error");
     }
 
     // Check for vertical GPS accuracy
@@ -139,7 +139,7 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (vAccFail)
     {
-        strcpy(osd_ekf_status_string, "EKF GPS vertical acc error");
+        strcpy(ekf_status_string, "EKF GPS vertical acc error");
     }
 
     // fail if reported speed accuracy greater than threshold
@@ -148,7 +148,7 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (gpsSpdAccFail)
     {
-        strcpy(osd_ekf_status_string, "EKF GPS speed error");
+        strcpy(ekf_status_string, "EKF GPS speed error");
     }
 
     // fail if satellite geometry is poor
@@ -157,7 +157,7 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (hdopFail)
     {
-        strcpy(osd_ekf_status_string, "EKF GPS HDOP error");
+        strcpy(ekf_status_string, "EKF GPS HDOP error");
     }
 
     // fail if not enough sats
@@ -166,7 +166,7 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (numSatsFail)
     {
-        strcpy(osd_ekf_status_string, "EKF GPS num sats error");
+        strcpy(ekf_status_string, "EKF GPS num sats error");
     }
 
     // fail if magnetometer innovations are outside limits indicating bad yaw
@@ -184,13 +184,13 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (yawFail)
     {
-        strcpy(osd_ekf_status_string, "EKF mag yaw error");
+        strcpy(ekf_status_string, "EKF mag yaw error");
     }
 
     // assume failed first time through and notify user checks have started
     if (lastGpsVelFail_ms == 0)
     {
-        strcpy(osd_ekf_status_string, "EKF starting GPS checks");
+        strcpy(ekf_status_string, "EKF starting GPS checks");
         lastGpsVelFail_ms = imuSampleTime_ms;
     }
 

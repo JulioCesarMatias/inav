@@ -63,9 +63,9 @@ void readRangeFinder(void)
             }
 
             // don't allow time to go backwards
-            if (storedRngMeasTime_ms[midIndex] > rangeDataNew.time_ms)
+            if (storedRngMeasTime_ms[midIndex] > rangeDataNew.obs.time_ms)
             {
-                rangeDataNew.time_ms = storedRngMeasTime_ms[midIndex];
+                rangeDataNew.obs.time_ms = storedRngMeasTime_ms[midIndex];
             }
 
             // limit the measured range to be no less than the on-ground range
@@ -80,7 +80,7 @@ void readRangeFinder(void)
         else if (!takeOffDetected && ((imuSampleTime_ms - rngValidMeaTime_ms) > 200))
         {
             // before takeoff we assume on-ground range value if there is no data
-            rangeDataNew.time_ms = imuSampleTime_ms;
+            rangeDataNew.obs.time_ms = imuSampleTime_ms;
             rangeDataNew.rng = rngOnGnd;
 
             // write data to buffer with time stamp to be fused when the fusion time horizon catches up with it
@@ -92,53 +92,80 @@ void readRangeFinder(void)
     }
 }
 
-float get_2D_vector_angle(const fpVector2_t v1, const fpVector2_t v2)
+// write the raw optical flow measurements
+// this needs to be called externally.
+void writeOptFlowMeas(const uint8_t rawFlowQuality, const fpVector2_t rawFlowRates, const fpVector2_t rawGyroRates, const fpVector3_t posOffset, float heightOverride)
 {
-    const float len = calc_length_pythagorean_2D(v1.x, v1.y) * calc_length_pythagorean_2D(v2.x, v2.y);
-
-    if (len <= 0)
+    // The raw measurements need to be optical flow rates in radians/second averaged across the time since the last update
+    // The PX4Flow sensor outputs flow rates with the following axis and sign conventions:
+    // A positive X rate is produced by a positive sensor rotation about the X axis
+    // A positive Y rate is produced by a positive sensor rotation about the Y axis
+    // This filter uses a different definition of optical flow rates to the sensor with a positive optical flow rate produced by a
+    // negative rotation about that axis. For example a positive rotation of the flight vehicle about its X (roll) axis would produce a negative X flow rate
+    flowMeaTime_ms = imuSampleTime_ms;
+    // calculate bias errors on flow sensor gyro rates, but protect against spikes in data
+    // reset the accumulated body delta angle and time
+    // don't do the calculation if not enough time lapsed for a reliable body rate measurement
+    if (delTimeOF > 0.01f)
     {
-        return 0.0f;
+        flowGyroBias.x = 0.99f * flowGyroBias.x + 0.01f * constrainf((rawGyroRates.x - delAngBodyOF.x / delTimeOF), -0.1f, 0.1f);
+        flowGyroBias.y = 0.99f * flowGyroBias.y + 0.01f * constrainf((rawGyroRates.y - delAngBodyOF.y / delTimeOF), -0.1f, 0.1f);
+        vectorZero(&delAngBodyOF);
+        delTimeOF = 0.0f;
     }
+    // by definition if this function is called, then flow measurements have been provided so we
+    // need to run the optical flow takeoff detection
+    detectOptFlowTakeoff();
 
-    // Calculate the dot product of the two vectors
-    float dot_product = v1.x * v2.x + v1.y * v2.y;
+    // calculate rotation matrices at mid sample time for flow observations
+    quaternionToRotationMatrix(ekfStates.stateStruct.quat, &Tbn_flow);
 
-    const float cosv = dot_product / len;
-
-    if (cosv >= 1)
+    // don't use data with a low quality indicator or extreme rates (helps catch corrupt sensor data)
+    if ((rawFlowQuality > 0) && calc_length_pythagorean_2D(rawFlowRates.x, rawFlowRates.y) < 4.2f && calc_length_pythagorean_2D(rawGyroRates.x, rawGyroRates.y) < 4.2f)
     {
-        return 0.0f;
+        // correct flow sensor body rates for bias and write
+        ofDataNew.bodyRadXYZ.x = rawGyroRates.x - flowGyroBias.x;
+        ofDataNew.bodyRadXYZ.y = rawGyroRates.y - flowGyroBias.y;
+        // the sensor interface doesn't provide a z axis rate so use the rate from the nav sensor instead
+        if (delTimeOF > 0.001f)
+        {
+            // first preference is to use the rate averaged over the same sampling period as the flow sensor
+            ofDataNew.bodyRadXYZ.z = delAngBodyOF.z / delTimeOF;
+        }
+        else if (imuDataNew.delAngDT > 0.001f)
+        {
+            // second preference is to use most recent IMU data
+            ofDataNew.bodyRadXYZ.z = imuDataNew.delAng.z / imuDataNew.delAngDT;
+        }
+        else
+        {
+            // third preference is use zero
+            ofDataNew.bodyRadXYZ.z = 0.0f;
+        }
+        // write uncorrected flow rate measurements
+        // note correction for different axis and sign conventions used by the px4flow sensor
+        ofDataNew.flowRadXY.x = -rawFlowRates.x; // raw (non motion compensated) optical flow angular rate about the X axis (rad/sec)
+        ofDataNew.flowRadXY.y = -rawFlowRates.y; // raw (non motion compensated) optical flow angular rate about the X axis (rad/sec)
+        // write the flow sensor position in body frame
+        ofDataNew.body_offset = posOffset;
+        // write the flow sensor height override
+        ofDataNew.heightOverride = heightOverride;
+        // write flow rate measurements corrected for body rates
+        ofDataNew.flowRadXYcomp.x = ofDataNew.flowRadXY.x + ofDataNew.bodyRadXYZ.x;
+        ofDataNew.flowRadXYcomp.y = ofDataNew.flowRadXY.y + ofDataNew.bodyRadXYZ.y;
+        // record time last observation was received so we can detect loss of data elsewhere
+        flowValidMeaTime_ms = imuSampleTime_ms;
+        // estimate sample time of the measurement
+        ofDataNew.obs.time_ms = imuSampleTime_ms - ekfParam._flowDelay_ms - ekfParam.flowTimeDeltaAvg_ms / 2;
+        // Correct for the average intersampling delay due to the filter updaterate
+        ofDataNew.obs.time_ms -= localFilterTimeStep_ms / 2;
+        // Prevent time delay exceeding age of oldest IMU data in the buffer
+        ofDataNew.obs.time_ms = MAX(ofDataNew.obs.time_ms, imuDataDelayed.time_ms);
+        // Save data to buffer
+        ekf_ring_buffer_push(&storedOF, OPTFLOW_RING_BUFFER, &ofDataNew);
+        // Check for data at the fusion time horizon
+        flowDataToFuse = ekf_ring_buffer_recall(&storedOF, OPTFLOW_RING_BUFFER, &ofDataDelayed, imuDataDelayed.time_ms);
     }
-
-    if (cosv <= -1)
-    {
-        return M_PIf;
-    }
-
-    return acosf(cosv);
-}
-
-float get_3D_vector_angle(const fpVector3_t v1, const fpVector3_t v2)
-{
-    const float len = calc_length_pythagorean_3D(v1.x, v1.y, v1.z) * calc_length_pythagorean_3D(v2.x, v2.y, v2.z);
-
-    if (len <= 0)
-    {
-        return 0.0f;
-    }
-
-    // Calculate the dot product of the two vectors
-    float dot_product = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
-
-    const float cosv = dot_product / len;
-
-    if (fabsf(cosv) >= 1)
-    {
-        return 0.0f;
-    }
-
-    return acosf(cosv);
 }
 
 bool compassConsistent(void)
@@ -218,7 +245,11 @@ void readMagData(void)
         fpVector3_t nowMagOffsets = {.v = {(compassConfig()->magZero.raw[X] / 1024 * compassConfig()->magGain[X]),
                                            (compassConfig()->magZero.raw[Y] / 1024 * compassConfig()->magGain[Y]),
                                            (compassConfig()->magZero.raw[Z] / 1024 * compassConfig()->magGain[Z])}};
-        bool changeDetected = lastMagOffsetsValid && (nowMagOffsets.x != lastMagOffsets.x || nowMagOffsets.y != lastMagOffsets.y || nowMagOffsets.z != lastMagOffsets.z);
+
+        bool changeDetected = lastMagOffsetsValid &&
+                              (nowMagOffsets.x != lastMagOffsets.x ||
+                               nowMagOffsets.y != lastMagOffsets.y ||
+                               nowMagOffsets.z != lastMagOffsets.z);
 
         if (changeDetected)
         {
@@ -242,10 +273,10 @@ void readMagData(void)
         mag_elements_t magDataNew;
 
         // estimate of time magnetometer measurement was taken, allowing for delays
-        magDataNew.time_ms = imuSampleTime_ms - ekfParam.magDelay_ms;
+        magDataNew.obs.time_ms = imuSampleTime_ms - ekfParam.magDelay_ms;
 
         // Correct for the average intersampling delay due to the filter updaterate
-        magDataNew.time_ms -= localFilterTimeStep_ms / 2;
+        magDataNew.obs.time_ms -= localFilterTimeStep_ms / 2;
 
         // read compass data and scale to improve numerical conditioning
         fpVector3_t magField = getMagField();
@@ -274,7 +305,7 @@ void readMagData(void)
 void readIMUData(void)
 {
     // average IMU sampling rate
-    dtIMUavg = 1.0f / (float)ekfParam._frameTimeUsec;
+    dtIMUavg = 1.0f / (float)ekfParam._imuTimeHz;
 
     // Get delta angle data from accelerometer
     readDeltaVelocity(&imuDataNew.delVel, &imuDataNew.delVelDT);
@@ -323,7 +354,7 @@ void readIMUData(void)
         imuDataDownSampledNew.time_ms = imuSampleTime_ms;
 
         // Write data to the FIFO IMU buffer
-        ekf_imu_buffer_push_youngest_element(&storedIMU, &imuDataDownSampledNew);
+        ekf_imu_buffer_push_youngest_element(&storedIMU, &imuDataDownSampledNew, IMU_RING_BUFFER);
 
         // calculate the achieved average time step rate for the EKF
         float dtNow = constrainf(0.5f * (imuDataDownSampledNew.delAngDT + imuDataDownSampledNew.delVelDT), 0.0f, 10.0f * EKF_TARGET_DT);
@@ -344,7 +375,7 @@ void readIMUData(void)
         runUpdates = true;
 
         // extract the oldest available data from the FIFO buffer
-        ekf_imu_buffer_get_oldest_element(&storedIMU, &imuDataDelayed);
+        ekf_imu_buffer_get_oldest_element(&storedIMU, &imuDataDelayed, IMU_RING_BUFFER);
 
         // protect against delta time going to zero
         // TODO - check if calculations can tolerate 0
@@ -396,13 +427,13 @@ void readGpsData(void)
 
             // estimate when the GPS fix was valid, allowing for GPS processing and other delays
             // ideally we should be using a timing signal from the GPS receiver to set this time
-            gpsDataNew.time_ms = lastTimeGpsReceived_ms - ekf_getGPSDelay();
+            gpsDataNew.obs.time_ms = lastTimeGpsReceived_ms - ekf_getGPSDelay();
 
             // Correct for the average intersampling delay due to the filter updaterate
-            gpsDataNew.time_ms -= localFilterTimeStep_ms / 2;
+            gpsDataNew.obs.time_ms -= localFilterTimeStep_ms / 2;
 
             // Prevent time delay exceeding age of oldest IMU data in the buffer
-            gpsDataNew.time_ms = MAX(gpsDataNew.time_ms, imuDataDelayed.time_ms);
+            gpsDataNew.obs.time_ms = MAX(gpsDataNew.obs.time_ms, imuDataDelayed.time_ms);
 
             // read the NED velocity from the GPS
             gpsDataNew.vel.x = CENTIMETERS_TO_METERS(gpsSol.velNED[X]);
@@ -541,7 +572,7 @@ void readGpsData(void)
             if (validOrigin)
             {
                 gpsDataNew.pos = get_distance_NE(EKF_origin, gpsloc);
-                if ((ekfParam._originHgtMode & (1 << 2)) == 0)
+                if ((ekfParam._originHgtMode & (1 << HGT_SOURCE_GPS)) == 0)
                 {
                     gpsDataNew.hgt = (float)(0.01f * gpsloc.alt - ekfGpsRefHgt);
                 }
@@ -556,7 +587,7 @@ void readGpsData(void)
         }
         else
         {
-            strcpy(osd_ekf_status_string, "EKF waiting for 3D fix");
+            strcpy(ekf_status_string, "EKF waiting for 3D fix");
         }
     }
 }
@@ -586,8 +617,10 @@ void readDeltaAngle(fpVector3_t *dAng, float *dAng_dt)
 {
     fpVector3_t getGyro;
     gyroGetMeasuredRotationRate(&getGyro); // Calculate gyro rate in body frame in rad/s
-
-    *dAng_dt = getTaskDeltaTime(TASK_GYRO) * 1.0e-6f;
+    
+    // Even if the gyro runs in a different task than the acc, we still need to keep the gyro update rate the same as the acc. 
+    // Otherwise, the EKF will have problems with the outputs.
+    *dAng_dt = getTaskDeltaTime(TASK_PID) * 1.0e-6f;
     *dAng_dt = MAX(*dAng_dt, 1.0e-4f);
     *dAng_dt = MIN(*dAng_dt, 1.0e-1f);
 
@@ -616,13 +649,13 @@ void readBaroData(void)
         lastBaroReceived_ms = US2MS(posEstimator.baro.lastUpdateTime);
 
         // estimate of time height measurement was taken, allowing for delays
-        baroDataNew.time_ms = lastBaroReceived_ms - ekfParam._hgtDelay_ms;
+        baroDataNew.obs.time_ms = lastBaroReceived_ms - ekfParam._hgtDelay_ms;
 
         // Correct for the average intersampling delay due to the filter updaterate
-        baroDataNew.time_ms -= localFilterTimeStep_ms / 2;
+        baroDataNew.obs.time_ms -= localFilterTimeStep_ms / 2;
 
         // Prevent time delay exceeding age of oldest IMU data in the buffer
-        baroDataNew.time_ms = MAX(baroDataNew.time_ms, imuDataDelayed.time_ms);
+        baroDataNew.obs.time_ms = MAX(baroDataNew.obs.time_ms, imuDataDelayed.time_ms);
 
         // save baro measurement to buffer to be fused later
         ekf_ring_buffer_push(&storedBaro, BARO_RING_BUFFER, &baroDataNew);
@@ -692,14 +725,14 @@ void readAirSpdData(void)
     // if airspeed reading is valid and is set by the user to be used and has been updated then
     // we take a new reading, convert from EAS to TAS and set the flag letting other functions
     // know a new measurement is available
-    if (useAirspeed() && pitot.calibrationFinished && pitot.lastSeenHealthyMs != timeTasReceived_ms)
+    if (useAirspeed() && pitot.lastSeenHealthyMs != timeTasReceived_ms)
     {
         tasDataNew.tas = CENTIMETERS_TO_METERS(getAirspeedEstimate());
         timeTasReceived_ms = pitot.lastSeenHealthyMs;
-        tasDataNew.time_ms = timeTasReceived_ms - ekfParam.tasDelay_ms;
+        tasDataNew.obs.time_ms = timeTasReceived_ms - ekfParam.tasDelay_ms;
 
         // Correct for the average intersampling delay due to the filter update rate
-        tasDataNew.time_ms -= localFilterTimeStep_ms / 2;
+        tasDataNew.obs.time_ms -= localFilterTimeStep_ms / 2;
 
         // Save data into the buffer to be fused when the fusion time horizon catches up with it
         ekf_ring_buffer_push(&storedTAS, TAS_RING_BUFFER, &tasDataNew);

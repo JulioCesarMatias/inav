@@ -85,7 +85,6 @@ void controlMagYawReset(void)
     // Perform a reset of magnetic field states and reset yaw to corrected magnetic heading
     if (magYawResetRequest || magStateResetRequest)
     {
-
         if (magYawResetRequest || magStateResetRequest)
         {
             // get the euler angles from the current state estimate
@@ -111,17 +110,17 @@ void controlMagYawReset(void)
                 // send initial alignment status to OSD
                 if (!yawAlignComplete)
                 {
-                    strcpy(osd_ekf_status_string, "EKF IMU MAG initial yaw alignment complete");
+                    strcpy(ekf_status_string, "EKF IMU MAG initial yaw alignment complete");
                 }
 
                 // send in-flight yaw alignment status to OSD
                 if (finalResetRequest)
                 {
-                    strcpy(osd_ekf_status_string, "EKF IMU MAG in-flight yaw alignment complete");
+                    strcpy(ekf_status_string, "EKF IMU MAG in-flight yaw alignment complete");
                 }
                 else if (interimResetRequest)
                 {
-                    strcpy(osd_ekf_status_string, "EKF IMU MAG ground mag anomaly, yaw re-aligned");
+                    strcpy(ekf_status_string, "EKF IMU MAG ground mag anomaly, yaw re-aligned");
                 }
 
                 // update the yaw reset completed status
@@ -174,7 +173,7 @@ void realignYawGPS(void)
             ResetPosition();
 
             // send yaw alignment information to OSD
-            strcpy(osd_ekf_status_string, "EKF IMU yaw aligned to GPS velocity");
+            strcpy(ekf_status_string, "EKF IMU yaw aligned to GPS velocity");
 
             // zero the attitude covariances because the correlations will now be invalid
             zeroAttCovOnly();
@@ -1254,12 +1253,15 @@ void recordMagReset(void)
 bool EKFGSF_resetMainFilterYaw(void)
 {
     // Don't do a reset unless permitted by the EKF_GSF_USE_MASK and EKF_GSF_RUN_MASK parameter masks
-    if (!(ekfParam._gsfUseMask & (1U << 0)) || EKFGSF_yaw_reset_count >= ekfParam._gsfResetMaxCount)
+    if (EKFGSF_yaw_reset_count >= ekfParam._gsfResetMaxCount)
     {
         return false;
-    };
+    }
 
-    float yawEKFGSF, yawVarianceEKFGSF, velInnovLength;
+    float yawEKFGSF;
+    float yawVarianceEKFGSF; 
+    float velInnovLength;
+
     if (EKFGSF_yaw_getYawData(&yawEKFGSF, &yawVarianceEKFGSF) &&
         yawVarianceEKFGSF >= 0 &&
         yawVarianceEKFGSF < sq(RADIANS_TO_DEGREES(15.0f)) &&
@@ -1276,11 +1278,11 @@ bool EKFGSF_resetMainFilterYaw(void)
 
         if (!ekf_useCompass())
         {
-            strcpy(osd_ekf_status_string, "EKF IMU yaw aligned using GPS");
+            strcpy(ekf_status_string, "EKF IMU yaw aligned using GPS");
         }
         else
         {
-            strcpy(osd_ekf_status_string, "EKF IMU emergency yaw reset");
+            strcpy(ekf_status_string, "EKF IMU emergency yaw reset");
         }
 
         // Fail the magnetomer so it doesn't get used and pull the yaw away from the correct value

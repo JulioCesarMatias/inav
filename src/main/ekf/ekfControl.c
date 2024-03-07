@@ -30,24 +30,7 @@ void controlFilterModes(void)
     setAidingMode();
 }
 
-/*
-  return effective value for _magCal for this core
- */
-uint8_t effective_magCal(void)
-{
-    // force use of simple magnetic heading fusion
-    if (ekfParam._magMask & 0)
-    {
-        return 2;
-    }
-    else
-    {
-        return ekfParam._magCal;
-    }
-}
-
-// Determine if learning of wind and magnetic field will be enabled and set corresponding indexing limits to
-// avoid unnecessary operations
+// Determine if learning of wind and magnetic field will be enabled and set corresponding indexing limits to avoid unnecessary operations
 void setWindMagStateLearningMode(void)
 {
     // If we are on ground, or in constant position mode, or don't have the right vehicle and sensing to estimate wind, inhibit wind states
@@ -97,16 +80,14 @@ void setWindMagStateLearningMode(void)
     }
 
     // Determine if learning of magnetic field states has been requested by the user
-    uint8_t magCal = effective_magCal();
-    bool magCalRequested =
-        ((magCal == 0) && inFlight) ||                                     // when flying
-        ((magCal == 1) && manoeuvring) ||                                  // when manoeuvring
-        ((magCal == 3) && finalInflightYawInit && finalInflightMagInit) || // when initial in-air yaw and mag field reset is complete
-        (magCal == 4);                                                     // all the time
+    bool magCalRequested = ((ekfParam._magCal == 0) && inFlight) ||                                     // when flying
+                           ((ekfParam._magCal == 1) && manoeuvring) ||                                  // when manoeuvring
+                           ((ekfParam._magCal == 3) && finalInflightYawInit && finalInflightMagInit) || // when initial in-air yaw and mag field reset is complete
+                           (ekfParam._magCal == 4);                                                     // all the time
 
     // Deny mag calibration request if we aren't using the compass, it has been inhibited by the user,
     // we do not have an absolute position reference or are on the ground (unless explicitly requested by the user)
-    bool magCalDenied = !ekf_useCompass() || (magCal == 2) || (onGround && magCal != 4);
+    bool magCalDenied = !ekf_useCompass() || (ekfParam._magCal == 2) || (onGround && ekfParam._magCal != 4);
 
     // Inhibit the magnetic field calibration if not requested or denied
     bool setMagInhibit = !magCalRequested || magCalDenied;
@@ -300,7 +281,7 @@ void setAidingMode(void)
         {
         case AID_NONE:
             // We have ceased aiding
-            strcpy(osd_ekf_status_string, "EKF IMU has stopped aiding");
+            strcpy(ekf_status_string, "EKF IMU has stopped aiding");
             // When not aiding, estimate orientation & height fusing synthetic constant position and zero velocity measurement to constrain tilt errors
             posTimeout = true;
             velTimeout = true;
@@ -319,7 +300,7 @@ void setAidingMode(void)
 
         case AID_RELATIVE:
             // We have commenced aiding, but GPS usage has been prohibited so use optical flow only
-            strcpy(osd_ekf_status_string, "EKF IMU is using optical flow");
+            strcpy(ekf_status_string, "EKF IMU is using optical flow");
             posTimeout = true;
             velTimeout = true;
             // Reset the last valid flow measurement time
@@ -334,7 +315,7 @@ void setAidingMode(void)
             // We have commenced aiding and GPS usage is allowed
             if (canUseGPS)
             {
-                strcpy(osd_ekf_status_string, "EKF IMU is using GPS");
+                strcpy(ekf_status_string, "EKF IMU is using GPS");
             }
             posTimeout = false;
             velTimeout = false;
@@ -363,7 +344,7 @@ void checkAttitudeAlignmentStatus(void)
     if (tiltErrFilt < 0.005f && !tiltAlignComplete)
     {
         tiltAlignComplete = true;
-        strcpy(osd_ekf_status_string, "EKF IMU tilt alignment complete");
+        strcpy(ekf_status_string, "EKF IMU tilt alignment complete");
     }
 
     // submit yaw and magnetic field reset requests depending on whether we have compass data
@@ -385,7 +366,7 @@ void checkAttitudeAlignmentStatus(void)
 // return true if we should use the airspeed sensor
 bool useAirspeed(void)
 {
-    return sensors(SENSOR_PITOT);
+    return sensors(SENSOR_PITOT) && pitot.calibrationFinished;
 }
 
 // return true if optical flow data is available
@@ -406,9 +387,7 @@ bool ekf_useCompass(void)
     return sensors(SENSOR_MAG) && compassIsCalibrationComplete() && !magSensorFailed;
 }
 
-/*
-  should we assume zero sideslip?
- */
+// should we assume zero sideslip?
 bool assume_zero_sideslip(void)
 {
     // we don't assume zero sideslip for ground vehicles as EKF could
@@ -446,7 +425,7 @@ bool setOrigin(gpsLocation_t *loc)
     // define Earth rotation vector in the NED navigation frame at the origin
     calcEarthRateNED(&earthRateNED, EKF_origin.lat);
     validOrigin = true;
-    strcpy(osd_ekf_status_string, "EKF IMU origin set");
+    strcpy(ekf_status_string, "EKF IMU origin set");
 
     // put origin in frontend as well to ensure it stays in sync between lanes
     ekfParam.common_EKF_origin = EKF_origin;
@@ -502,7 +481,7 @@ void updateFilterStatus(void)
     bool gpsNavPossible = !gpsNotAvailable && gpsGoodToAlign && delAngBiasLearned;
     bool filterHealthy = coreHealthy() && tiltAlignComplete && (yawAlignComplete || (!ekf_useCompass() && (PV_AidingMode == AID_NONE)));
     // If GPS height usage is specified, height is considered to be inaccurate until the GPS passes all checks
-    bool hgtNotAccurate = (ekfParam._altSource == 2) && !validOrigin;
+    bool hgtNotAccurate = (ekfParam._altSource == HGT_SOURCE_GPS) && !validOrigin;
 
     // set individual flags
     filterStatus.flags.attitude = !(isnan(ekfStates.stateStruct.quat.q0) || isnan(ekfStates.stateStruct.quat.q1) || isnan(ekfStates.stateStruct.quat.q2) || isnan(ekfStates.stateStruct.quat.q3)) && filterHealthy; // attitude valid (we need a better check)
@@ -516,8 +495,8 @@ void updateFilterStatus(void)
     filterStatus.flags.pred_horiz_pos_rel = ((optFlowNavPossible || gpsNavPossible) && filterHealthy) || filterStatus.flags.horiz_pos_rel;                                                                          // we should be able to estimate a relative position when we enter flight mode
     filterStatus.flags.pred_horiz_pos_abs = (gpsNavPossible && filterHealthy) || filterStatus.flags.horiz_pos_abs;                                                                                                  // we should be able to estimate an absolute position when we enter flight mode
     filterStatus.flags.takeoff_detected = takeOffDetected;                                                                                                                                                          // takeoff for optical flow navigation has been detected
-    filterStatus.flags.takeoff = get_takeoff_expected();                                                                                                                                                        // The EKF has been told to expect takeoff and is in a ground effect mitigation mode
-    filterStatus.flags.touchdown = get_touchdown_expected();                                                                                                                                                    // The EKF has been told to detect touchdown and is in a ground effect mitigation mode
+    filterStatus.flags.takeoff = get_takeoff_expected();                                                                                                                                                            // The EKF has been told to expect takeoff and is in a ground effect mitigation mode
+    filterStatus.flags.touchdown = get_touchdown_expected();                                                                                                                                                        // The EKF has been told to detect touchdown and is in a ground effect mitigation mode
     filterStatus.flags.using_gps = ((imuSampleTime_ms - lastPosPassTime_ms) < 4000) && (PV_AidingMode == AID_ABSOLUTE);
     filterStatus.flags.gps_glitching = !gpsAccuracyGood && (PV_AidingMode == AID_ABSOLUTE); // GPS glitching is affecting navigation accuracy
     filterStatus.flags.gps_quality_good = gpsGoodToAlign;
@@ -535,7 +514,7 @@ void runYawEstimatorPrediction(void)
         float trueAirspeed;
         if (defaultAirSpeed >= 0 && assume_zero_sideslip())
         {
-            if (imuDataDelayed.time_ms - tasDataDelayed.time_ms < 5000)
+            if (imuDataDelayed.time_ms - tasDataDelayed.obs.time_ms < 5000)
             {
                 trueAirspeed = tasDataDelayed.tas;
             }

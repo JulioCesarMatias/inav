@@ -2,32 +2,85 @@
 #include "common/quaternion.h"
 #include "common/vector.h"
 
-// wrap an angle defined in radians to -PI ~ PI (equivalent to +- 180 degrees)
-static inline float wrap_PI(float angle_in_radians)
+// wrap an angle defined in radians to -PI ~ PI
+static inline float wrap_2PI(const float radian)
 {
-  if (angle_in_radians > 10 * M_PIf || angle_in_radians < -10 * M_PIf)
+  float res = fmodf(radian, 2 * M_PIf);
+
+  if (res < 0)
   {
-    // for very large numbers use modulus
-    angle_in_radians = fmodf(angle_in_radians, 2 * M_PIf);
+    res += 2 * M_PIf;
   }
 
-  while (angle_in_radians > M_PIf)
+  return res;
+}
+
+// wrap an angle defined in radians to -PI ~ PI
+static inline float wrap_PI(const float radian)
+{
+  float res = wrap_2PI(radian);
+
+  if (res > M_PI)
   {
-    angle_in_radians -= 2 * M_PIf;
+    res -= 2 * M_PIf;
   }
 
-  while (angle_in_radians < -M_PIf)
-  {
-    angle_in_radians += 2 * M_PIf;
-  }
-
-  return angle_in_radians;
+  return res;
 }
 
 // Function to calculate the squared length of a vector
 static inline float vector_squared_length(fpVector3_t vec)
 {
   return vec.x * vec.x + vec.y * vec.y + vec.z * vec.z;
+}
+
+static inline float get_2D_vector_angle(const fpVector2_t v1, const fpVector2_t v2)
+{
+  const float len = calc_length_pythagorean_2D(v1.x, v1.y) * calc_length_pythagorean_2D(v2.x, v2.y);
+
+  if (len <= 0)
+  {
+    return 0.0f;
+  }
+
+  // Calculate the dot product of the two vectors
+  float dot_product = v1.x * v2.x + v1.y * v2.y;
+
+  const float cosv = dot_product / len;
+
+  if (cosv >= 1)
+  {
+    return 0.0f;
+  }
+
+  if (cosv <= -1)
+  {
+    return M_PIf;
+  }
+
+  return acosf(cosv);
+}
+
+static inline float get_3D_vector_angle(const fpVector3_t v1, const fpVector3_t v2)
+{
+  const float len = calc_length_pythagorean_3D(v1.x, v1.y, v1.z) * calc_length_pythagorean_3D(v2.x, v2.y, v2.z);
+
+  if (len <= 0)
+  {
+    return 0.0f;
+  }
+
+  // Calculate the dot product of the two vectors
+  float dot_product = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
+
+  const float cosv = dot_product / len;
+
+  if (fabsf(cosv) >= 1)
+  {
+    return 0.0f;
+  }
+
+  return acosf(cosv);
 }
 
 static inline void zeroMatrix(fpMat3_t *matrix)
@@ -201,15 +254,16 @@ static inline fpQuaternion_t quaternionDivision(const fpQuaternion_t v, const fp
 
 static inline void quaternion_normalize(fpQuaternion_t *q)
 {
-    const float quatMag = sqrtf(sq(q->q0) + sq(q->q1) + sq(q->q2) + sq(q->q3));
+  const float quatMag = sqrtf(sq(q->q0) + sq(q->q1) + sq(q->q2) + sq(q->q3));
 
-    if (!is_zero(quatMag)) {
-        const float quatMagInv = 1.0f / quatMag;
-        q->q0 *= quatMagInv;
-        q->q1 *= quatMagInv;
-        q->q2 *= quatMagInv;
-        q->q3 *= quatMagInv;
-    }
+  if (!is_zero(quatMag))
+  {
+    const float quatMagInv = 1.0f / quatMag;
+    q->q0 *= quatMagInv;
+    q->q1 *= quatMagInv;
+    q->q2 *= quatMagInv;
+    q->q3 *= quatMagInv;
+  }
 }
 
 // create a quaternion from its axis-angle representation
@@ -339,12 +393,12 @@ static inline fpQuaternion_t quaternion_from_rotation_matrix(fpMat3_t m)
 // create a quaternion from Euler angles
 static inline void quaternionFromEuler(fpQuaternion_t *q, float roll, float pitch, float yaw)
 {
-  const float cr2 = cos_approx(roll * 0.5f);
-  const float cp2 = cos_approx(pitch * 0.5f);
-  const float cy2 = cos_approx(yaw * 0.5f);
-  const float sr2 = sin_approx(roll * 0.5f);
-  const float sp2 = sin_approx(pitch * 0.5f);
-  const float sy2 = sin_approx(yaw * 0.5f);
+  const float cr2 = cosf(roll * 0.5f);
+  const float cp2 = cosf(pitch * 0.5f);
+  const float cy2 = cosf(yaw * 0.5f);
+  const float sr2 = sinf(roll * 0.5f);
+  const float sp2 = sinf(pitch * 0.5f);
+  const float sy2 = sinf(yaw * 0.5f);
 
   q->q0 = cr2 * cp2 * cy2 + sr2 * sp2 * sy2;
   q->q1 = sr2 * cp2 * cy2 - cr2 * sp2 * sy2;
@@ -355,9 +409,9 @@ static inline void quaternionFromEuler(fpQuaternion_t *q, float roll, float pitc
 // create eulers from a quaternion
 static inline void quaternionToEuler(fpQuaternion_t q, float *roll, float *pitch, float *yaw)
 {
-  *roll = atan2_approx(2.0f * (q.q0 * q.q1 + q.q2 * q.q3), 1.0f - 2.0f * (q.q1 * q.q1 + q.q2 * q.q2));
-  *pitch = asin_approx(2.0f * (q.q0 * q.q2 - q.q3 * q.q1));
-  *yaw = atan2_approx(2.0f * (q.q0 * q.q3 + q.q1 * q.q2), 1.0f - 2.0f * (q.q2 * q.q2 + q.q3 * q.q3));
+  *roll = atan2f(2.0f * (q.q0 * q.q1 + q.q2 * q.q3), 1.0f - 2.0f * (q.q1 * q.q1 + q.q2 * q.q2));
+  *pitch = asinf(2.0f * (q.q0 * q.q2 - q.q3 * q.q1));
+  *yaw = atan2f(2.0f * (q.q0 * q.q3 + q.q1 * q.q2), 1.0f - 2.0f * (q.q2 * q.q2 + q.q3 * q.q3));
 }
 
 // convert this quaternion to a rotation vector where the direction of the vector represents

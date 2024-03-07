@@ -73,13 +73,10 @@ typedef struct
   int8_t _useRngSwHgt;          // Maximum valid range of the range finder as a percentage of the maximum range specified by the sensor driver
   float _terrGradMax;           // Maximum terrain gradient below the vehicle
   float _useRngSwSpd;           // Maximum horizontal ground speed to use range finder as the primary height source (m/s)
-  int8_t _magMask;              // Bitmask forcng specific EKF core instances to use simple heading magnetometer fusion.
   int8_t _originHgtMode;        // Bitmask controlling post alignment correction and reporting of the EKF origin height.
   int8_t _flowUse;              // Controls if the optical flow data is fused into the main navigation estimator and/or the terrain estimator.
   int16_t _mag_ef_limit;        // limit on difference between WMM tables and learned earth field.
   float _hrt_filt_freq;         // frequency of output observer height rate complementary filter in Hz
-  int8_t _gsfRunMask;           // mask controlling which EKF instances run a separate EKF-GSF yaw estimator
-  int8_t _gsfUseMask;           // mask controlling which EKF instances will use EKF-GSF yaw estimator data to assit with yaw resets
   int8_t _gsfResetMaxCount;     // maximum number of times the EKF is allowed to reset it's yaw to the EKF-GSF estimate
 
   // Developer configurable params
@@ -106,10 +103,10 @@ typedef struct
   uint8_t flowTimeDeltaAvg_ms;    // average interval between optical flow measurements (msec)
   uint8_t flowIntervalMax_ms;     // maximum allowable time between flow fusion events
   float gndEffectBaroScaler;      // scaler applied to the barometer observation variance when ground effect mode is active
-  uint8_t fusionTimeStep_ms;      // The minimum time interval between covariance predictions and measurement fusions in msec
   float maxYawEstVelInnov;        // Maximum acceptable length of the velocity innovation returned by the EKF-GSF yaw estimator (m/s)
   uint8_t _framesPerPrediction;   // expected number of IMU frames per prediction
   uint32_t _frameTimeUsec;        // time per IMU frame
+  uint16_t _imuTimeHz;            // IMU time in Hz
   uint64_t imuSampleTime_us;      // time at start of current filter update
   gpsLocation_t common_EKF_origin;
   bool common_origin_valid;
