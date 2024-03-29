@@ -162,10 +162,28 @@ void setAidingMode(void)
     switch (PV_AidingMode)
     {
     case AID_NONE:
-    {
         // Don't allow filter to start position or velocity aiding until the tilt and yaw alignment is complete
         // and IMU gyro bias estimates have stabilised
-        bool filterIsStable = tiltAlignComplete && yawAlignComplete && checkGyroCalStatus();
+        const bool ekf_gyro_cal_ok = checkGyroCalStatus();
+        const bool filterIsStable = tiltAlignComplete && yawAlignComplete && ekf_gyro_cal_ok;
+        if (!ekf_gyro_cal_ok)
+        {
+            if (!ekf_msg_sended[0])
+            {
+                sendEKFLogMessage("EKF Gyro Calibration error!");
+                ekf_msg_sended[0] = true;
+                ekf_msg_sended[1] = false;
+            }
+        }
+        else
+        {
+            if (!ekf_msg_sended[1])
+            {
+                sendEKFLogMessage("EKF Gyro Calibration successful!");
+                ekf_msg_sended[0] = false;
+                ekf_msg_sended[1] = true;
+            }
+        }
         // If GPS usage has been prohiited then we use flow aiding provided optical flow data is present
         // GPS aiding is the preferred option unless excluded by the user
         bool canUseGPS = ((ekfParam._fusionModeGPS) != 3 && readyToUseGPS() && filterIsStable);
@@ -177,11 +195,9 @@ void setAidingMode(void)
         {
             PV_AidingMode = AID_RELATIVE;
         }
-    }
-    break;
+        break;
 
     case AID_RELATIVE:
-    {
         // Check if the optical flow sensor has timed out
         bool flowSensorTimeout = ((imuSampleTime_ms - flowValidMeaTime_ms) > 5000);
         // Check if the fusion has timed out (flow measurements have been rejected for too long)
@@ -196,11 +212,9 @@ void setAidingMode(void)
         {
             PV_AidingMode = AID_NONE;
         }
-    }
-    break;
+        break;
 
     case AID_ABSOLUTE:
-    {
         // Find the minimum time without data required to trigger any check
         uint16_t minTestTime_ms = MIN(ekfParam.tiltDriftTimeMax_ms, MIN(ekfParam.posRetryTimeNoVel_ms, ekfParam.posRetryTimeUseVel_ms));
 
@@ -271,7 +285,6 @@ void setAidingMode(void)
         }
         break;
     }
-    }
 
     // check to see if we are starting or stopping aiding and set states and modes as required
     if (PV_AidingMode != PV_AidingModePrev)
@@ -281,7 +294,7 @@ void setAidingMode(void)
         {
         case AID_NONE:
             // We have ceased aiding
-            strcpy(ekf_status_string, "EKF IMU has stopped aiding");
+            sendEKFLogMessage("EKF IMU has stopped aiding");
             // When not aiding, estimate orientation & height fusing synthetic constant position and zero velocity measurement to constrain tilt errors
             posTimeout = true;
             velTimeout = true;
@@ -300,7 +313,7 @@ void setAidingMode(void)
 
         case AID_RELATIVE:
             // We have commenced aiding, but GPS usage has been prohibited so use optical flow only
-            strcpy(ekf_status_string, "EKF IMU is using optical flow");
+            sendEKFLogMessage("EKF IMU is using optical flow");
             posTimeout = true;
             velTimeout = true;
             // Reset the last valid flow measurement time
@@ -310,20 +323,18 @@ void setAidingMode(void)
             break;
 
         case AID_ABSOLUTE:
-        {
             bool canUseGPS = ((ekfParam._fusionModeGPS) != 3 && readyToUseGPS());
             // We have commenced aiding and GPS usage is allowed
             if (canUseGPS)
             {
-                strcpy(ekf_status_string, "EKF IMU is using GPS");
+                sendEKFLogMessage("EKF IMU is using GPS");
             }
             posTimeout = false;
             velTimeout = false;
             // reset the last fusion accepted times to prevent unwanted activation of timeout logic
             lastPosPassTime_ms = imuSampleTime_ms;
             lastVelPassTime_ms = imuSampleTime_ms;
-        }
-        break;
+            break;
         }
 
         // Always reset the position and velocity when changing mode
@@ -341,10 +352,17 @@ void checkAttitudeAlignmentStatus(void)
     float temp = calc_length_pythagorean_3D(tiltErrVec.x, tiltErrVec.y, tiltErrVec.z);
     tiltErrFilt = alpha * temp + (1.0f - alpha) * tiltErrFilt;
 
-    if (tiltErrFilt < 0.005f && !tiltAlignComplete)
+    if (!tiltAlignComplete)
     {
-        tiltAlignComplete = true;
-        strcpy(ekf_status_string, "EKF IMU tilt alignment complete");
+        if (tiltErrFilt < 0.005f)
+        {
+            tiltAlignComplete = true;
+            sendEKFLogMessage("EKF IMU tilt alignment complete!");
+        }
+        else
+        {
+            sendEKFLogMessage("EKF IMU tilt alignment fail!");
+        }
     }
 
     // submit yaw and magnetic field reset requests depending on whether we have compass data
@@ -425,7 +443,7 @@ bool setOrigin(gpsLocation_t *loc)
     // define Earth rotation vector in the NED navigation frame at the origin
     calcEarthRateNED(&earthRateNED, EKF_origin.lat);
     validOrigin = true;
-    strcpy(ekf_status_string, "EKF IMU origin set");
+    sendEKFLogMessage("EKF IMU origin set");
 
     // put origin in frontend as well to ensure it stays in sync between lanes
     ekfParam.common_EKF_origin = EKF_origin;
@@ -448,7 +466,8 @@ void recordYawReset(void)
 bool checkGyroCalStatus(void)
 {
     // check delta angle bias variances
-    const float delAngBiasVarMax = sq(RADIANS_TO_DEGREES(0.15f * dtEkfAvg));
+    const float delAngBiasVarMax = sq(DEGREES_TO_RADIANS(0.15f * dtEkfAvg));
+
     if (!ekf_useCompass())
     {
         // rotate the variances into earth frame and evaluate horizontal terms only as yaw component is poorly observable without a compass
@@ -464,6 +483,7 @@ bool checkGyroCalStatus(void)
                             (P[10][10] <= delAngBiasVarMax) &&
                             (P[11][11] <= delAngBiasVarMax);
     }
+
     return delAngBiasLearned;
 }
 
@@ -484,19 +504,23 @@ void updateFilterStatus(void)
     bool hgtNotAccurate = (ekfParam._altSource == HGT_SOURCE_GPS) && !validOrigin;
 
     // set individual flags
-    filterStatus.flags.attitude = !(isnan(ekfStates.stateStruct.quat.q0) || isnan(ekfStates.stateStruct.quat.q1) || isnan(ekfStates.stateStruct.quat.q2) || isnan(ekfStates.stateStruct.quat.q3)) && filterHealthy; // attitude valid (we need a better check)
-    filterStatus.flags.horiz_vel = someHorizRefData && filterHealthy;                                                                                                                                               // horizontal velocity estimate valid
-    filterStatus.flags.vert_vel = someVertRefData && filterHealthy;                                                                                                                                                 // vertical velocity estimate valid
-    filterStatus.flags.horiz_pos_rel = ((doingFlowNav && gndOffsetValid) || doingWindRelNav || doingNormalGpsNav) && filterHealthy;                                                                                 // relative horizontal position estimate valid
-    filterStatus.flags.horiz_pos_abs = doingNormalGpsNav && filterHealthy;                                                                                                                                          // absolute horizontal position estimate valid
-    filterStatus.flags.vert_pos = !hgtTimeout && filterHealthy && !hgtNotAccurate;                                                                                                                                  // vertical position estimate valid
-    filterStatus.flags.terrain_alt = gndOffsetValid && filterHealthy;                                                                                                                                               // terrain height estimate valid
-    filterStatus.flags.const_pos_mode = (PV_AidingMode == AID_NONE) && filterHealthy;                                                                                                                               // constant position mode
-    filterStatus.flags.pred_horiz_pos_rel = ((optFlowNavPossible || gpsNavPossible) && filterHealthy) || filterStatus.flags.horiz_pos_rel;                                                                          // we should be able to estimate a relative position when we enter flight mode
-    filterStatus.flags.pred_horiz_pos_abs = (gpsNavPossible && filterHealthy) || filterStatus.flags.horiz_pos_abs;                                                                                                  // we should be able to estimate an absolute position when we enter flight mode
-    filterStatus.flags.takeoff_detected = takeOffDetected;                                                                                                                                                          // takeoff for optical flow navigation has been detected
-    filterStatus.flags.takeoff = get_takeoff_expected();                                                                                                                                                            // The EKF has been told to expect takeoff and is in a ground effect mitigation mode
-    filterStatus.flags.touchdown = get_touchdown_expected();                                                                                                                                                        // The EKF has been told to detect touchdown and is in a ground effect mitigation mode
+    filterStatus.flags.attitude = !(isnan(ekfStates.stateStruct.quat.q0) ||
+                                    isnan(ekfStates.stateStruct.quat.q1) ||
+                                    isnan(ekfStates.stateStruct.quat.q2) ||
+                                    isnan(ekfStates.stateStruct.quat.q3)) &&
+                                  filterHealthy;                                                                                           // attitude valid (we need a better check)
+    filterStatus.flags.horiz_vel = someHorizRefData && filterHealthy;                                                                      // horizontal velocity estimate valid
+    filterStatus.flags.vert_vel = someVertRefData && filterHealthy;                                                                        // vertical velocity estimate valid
+    filterStatus.flags.horiz_pos_rel = ((doingFlowNav && gndOffsetValid) || doingWindRelNav || doingNormalGpsNav) && filterHealthy;        // relative horizontal position estimate valid
+    filterStatus.flags.horiz_pos_abs = doingNormalGpsNav && filterHealthy;                                                                 // absolute horizontal position estimate valid
+    filterStatus.flags.vert_pos = !hgtTimeout && filterHealthy && !hgtNotAccurate;                                                         // vertical position estimate valid
+    filterStatus.flags.terrain_alt = gndOffsetValid && filterHealthy;                                                                      // terrain height estimate valid
+    filterStatus.flags.const_pos_mode = (PV_AidingMode == AID_NONE) && filterHealthy;                                                      // constant position mode
+    filterStatus.flags.pred_horiz_pos_rel = ((optFlowNavPossible || gpsNavPossible) && filterHealthy) || filterStatus.flags.horiz_pos_rel; // we should be able to estimate a relative position when we enter flight mode
+    filterStatus.flags.pred_horiz_pos_abs = (gpsNavPossible && filterHealthy) || filterStatus.flags.horiz_pos_abs;                         // we should be able to estimate an absolute position when we enter flight mode
+    filterStatus.flags.takeoff_detected = takeOffDetected;                                                                                 // takeoff for optical flow navigation has been detected
+    filterStatus.flags.takeoff = get_takeoff_expected();                                                                                   // The EKF has been told to expect takeoff and is in a ground effect mitigation mode
+    filterStatus.flags.touchdown = get_touchdown_expected();                                                                               // The EKF has been told to detect touchdown and is in a ground effect mitigation mode
     filterStatus.flags.using_gps = ((imuSampleTime_ms - lastPosPassTime_ms) < 4000) && (PV_AidingMode == AID_ABSOLUTE);
     filterStatus.flags.gps_glitching = !gpsAccuracyGood && (PV_AidingMode == AID_ABSOLUTE); // GPS glitching is affecting navigation accuracy
     filterStatus.flags.gps_quality_good = gpsGoodToAlign;

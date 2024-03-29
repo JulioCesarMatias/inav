@@ -40,20 +40,18 @@
 
 #define SOLVE_AFTER
 
-// GPS pre-flight check bit locations
-#define MASK_GPS_NSATS (1 << 0)
-#define MASK_GPS_HDOP (1 << 1)
-#define MASK_GPS_SPD_ERR (1 << 2)
-#define MASK_GPS_POS_ERR (1 << 3)
-#define MASK_GPS_YAW_ERR (1 << 4)
-#define MASK_GPS_POS_DRIFT (1 << 5)
-#define MASK_GPS_VERT_SPD (1 << 6)
-#define MASK_GPS_HORIZ_SPD (1 << 7)
+#define EARTH_RATE 0.000072921f // earth rotation rate (rad/sec)
 
-// active height source
-#define HGT_SOURCE_BARO 0
-#define HGT_SOURCE_RNG 1
-#define HGT_SOURCE_GPS 2
+// initial imu bias uncertainty (deg/sec)
+#define INIT_ACCEL_BIAS_UNCERTAINTY 0.5f
+
+// maximum allowed gyro bias (rad/sec)
+#define GYRO_BIAS_LIMIT 0.5f
+
+// Length of FIFO buffers used for non-IMU sensor data.
+// Must be larger than the time period defined by IMU_BUFFER_LENGTH
+#define OBS_BUFFER_LENGTH 5
+#define FLOW_BUFFER_LENGTH 15
 
 // target EKF update time step
 #define EKF_TARGET_DT 0.01f
@@ -70,14 +68,29 @@
 // limit on horizontal position states
 #define EKF_POSXY_STATE_LIMIT 1.0e6
 
+#define COMPASS_MAX_XYZ_ANG_DIFF DEGREES_TO_RADIANS(90.0f)
+#define COMPASS_MAX_XY_ANG_DIFF DEGREES_TO_RADIANS(60.0f)
+#define COMPASS_MAX_XY_LENGTH_DIFF 200.0f
+
+// GPS pre-flight check bit locations
+#define MASK_GPS_NSATS (1 << 0)
+#define MASK_GPS_HDOP (1 << 1)
+#define MASK_GPS_SPD_ERR (1 << 2)
+#define MASK_GPS_POS_ERR (1 << 3)
+#define MASK_GPS_YAW_ERR (1 << 4)
+#define MASK_GPS_POS_DRIFT (1 << 5)
+#define MASK_GPS_VERT_SPD (1 << 6)
+#define MASK_GPS_HORIZ_SPD (1 << 7)
+
+// active height source
+#define HGT_SOURCE_BARO 0
+#define HGT_SOURCE_RNG 1
+#define HGT_SOURCE_GPS 2
+
 // Possible values for _flowUse
 #define FLOW_USE_NONE 0
 #define FLOW_USE_NAV 1
 #define FLOW_USE_TERRAIN 2
-
-#define COMPASS_MAX_XYZ_ANG_DIFF DEGREES_TO_RADIANS(90.0f)
-#define COMPASS_MAX_XY_ANG_DIFF DEGREES_TO_RADIANS(60.0f)
-#define COMPASS_MAX_XY_LENGTH_DIFF 200.0f
 
 typedef float Vector2[2];
 typedef float Vector3[3];
@@ -209,7 +222,7 @@ typedef struct
 typedef struct
 {
     uint8_t elsize;
-    union
+    struct
     {
         imu_elements_t *imu_buffer;
         output_elements_t *output_buffer;
@@ -271,7 +284,7 @@ typedef struct
 typedef struct
 {
     uint8_t elsize;
-    union
+    struct
     {
         gps_elements_t *gps_buffer;
         mag_elements_t *mag_buffer;
@@ -338,7 +351,7 @@ extern bool magTimeout;        // boolean true if magnetometer measurements have
 extern bool tasTimeout;        // boolean true if true airspeed measurements have failed for too long and have timed out
 extern bool badIMUdata;        // boolean true if the bad IMU data is detected
 
-extern float gpsNoiseScaler;                 // Used to scale the  GPS measurement noise and consistency gates to compensate for operation with small satellite counts
+extern uint8_t imu_buffer_length;            // Reference to the global EKF frontend for parameters
 extern Matrix24 P;                           // covariance matrix
 extern ekf_imu_buffer storedIMU;             // IMU data buffer
 extern ekf_ring_buffer storedGPS;            // GPS data buffer
@@ -355,6 +368,7 @@ extern float dtIMUavg;                       // expected time between IMU measur
 extern float dtEkfAvg;                       // expected time between EKF updates (sec)
 extern float dt;                             // time lapsed since the last covariance prediction (sec)
 extern float hgtRate;                        // state for rate of change of height filter
+extern float gpsNoiseScaler;                 // Used to scale the  GPS measurement noise and consistency gates to compensate for operation with small satellite counts
 extern bool onGround;                        // true when the flight vehicle is definitely on the ground
 extern bool prevOnGround;                    // value of onGround from previous frame - used to detect transition
 extern bool inFlight;                        // true when the vehicle is definitely flying
@@ -392,7 +406,7 @@ extern uint32_t timeAtLastAuxEKF_ms;         // last time the auxiliary filter w
 extern uint32_t lastHealthyMagTime_ms;       // time the magnetometer was last declared healthy
 extern bool magSensorFailed;                 // true if all magnetometer sensors have timed out on this flight and we are no longer using magnetometer data
 extern uint32_t lastYawTime_ms;              // time stamp when yaw observation was last fused (msec)
-extern uint32_t ekfStartTime_ms;             // time the EKF was started (msec)
+extern uint64_t ekfStartTime_us;             // time the EKF was started (usec)
 extern fpVector2_t lastKnownPositionNE;      // last known position
 extern float velTestRatio;                   // sum of squares of GPS velocity innovation divided by fail threshold
 extern float posTestRatio;                   // sum of squares of GPS position innovation divided by fail threshold
@@ -479,7 +493,6 @@ extern nav_filter_status_t filterStatus;     // contains the status of various f
 extern float ekfOriginHgtVar;                // Variance of the EKF WGS-84 origin height estimate (m^2)
 extern float ekfGpsRefHgt;                   // floating point representation of the WGS-84 reference height used to convert GPS height to local height (m)
 extern uint32_t lastOriginHgtTime_ms;        // last time the ekf's WGS-84 origin height was corrected
-extern uint8_t imu_buffer_length;            // Reference to the global EKF frontend for parameters
 
 // variables used by the pre-initialisation GPS checks
 extern gpsLocation_t gpsloc_prev;            // LLH location of previous GPS measurement
@@ -568,16 +581,13 @@ extern float yawInnovAtLastMagReset;      // magnetic yaw innovation last time t
 extern fpQuaternion_t quatAtLastMagReset; // quaternion states last time the mag states were reset
 extern uint8_t magYawAnomallyCount;       // Number of times the yaw has been reset due to a magnetic anomaly during initial ascent
 
-// string for using EKF messages in the OSD
-extern char ekf_status_string[50];
-
 // earth field from WMM tables
 extern bool have_table_earth_field;      // true when we have initialised table_earth_field_ga
 extern fpVector3_t table_earth_field_ga; // earth field from WMM tables
 extern float table_declination;          // declination in radians from the tables
 
-// when was attitude filter status last non-zero?
-extern uint32_t last_filter_ok_ms;
+extern bool ekf_msg_sended[2];
+extern uint32_t last_filter_ok_ms; // when was attitude filter status last non-zero?
 
 // The following declarations are used to control when the main navigation filter resets it's yaw to the estimate provided by the GSF
 extern uint32_t EKFGSF_yaw_reset_ms;         // timestamp of last emergency yaw reset (uSec)
@@ -585,7 +595,7 @@ extern uint32_t EKFGSF_yaw_reset_request_ms; // timestamp of last emergency yaw 
 extern uint8_t EKFGSF_yaw_reset_count;       // number of emergency yaw resets performed
 extern bool EKFGSF_run_filterbank;           // true when the filter bank is active
 
-bool setup_backend(void);
+bool setupEKFRingBuffer(void);
 
 // Initialise the states from accelerometer and magnetometer data (if present)
 // This method can only be used when the vehicle is static
@@ -593,10 +603,14 @@ bool coreInitialiseFilterBootstrap(void);
 
 // Update Filter States - this should be called whenever new IMU data is available
 // The predict flag is set true when a new prediction cycle can be started
-void coreUpdateFilter(bool predict);
+void coreUpdateFilter(bool predict, timeUs_t time_us);
 
 // Check basic filter health metrics and return a consolidated health status
 bool coreHealthy(void);
+
+// Return a consolidated error score where higher numbers represent larger errors
+// Intended to be used by the front-end to determine which is the primary EKF
+float errorScore(void);
 
 // Write the last calculated NE position relative to the reference point (m).
 // If a calculated solution is not available, use the best available data and return false
@@ -935,6 +949,8 @@ void selectHeightForFusion(void);
 
 // zero attitude state covariances, but preserve variances
 void zeroAttCovOnly(void);
+
+void sendEKFLogMessage(char msg[]);
 
 // record a yaw reset event
 void recordYawReset(void);

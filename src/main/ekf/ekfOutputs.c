@@ -19,12 +19,6 @@ bool coreHealthy(void)
         return false;
     }
 
-    // Give the filter a second to settle before use
-    if ((imuSampleTime_ms - ekfStartTime_ms) < 1000)
-    {
-        return false;
-    }
-
     // position and height innovations must be within limits when on-ground and in a static mode of operation
     float horizErrSq = sq(innovVelPos[3]) + sq(innovVelPos[4]);
     if (onGround && (PV_AidingMode == AID_NONE) && ((horizErrSq > 1.0f) || (fabsf(hgtInnovFiltState) > 1.0f)))
@@ -34,6 +28,25 @@ bool coreHealthy(void)
 
     // all OK
     return true;
+}
+
+// Return a consolidated error score where higher numbers represent larger errors
+// Intended to be used by the front-end to determine which is the primary EKF
+float errorScore(void)
+{
+    float score = 0.0f;
+    
+    if (tiltAlignComplete && yawAlignComplete) {
+        // Check GPS fusion performance
+        score = MAX(score, 0.5f * (velTestRatio + posTestRatio));
+        // Check altimeter fusion performance
+        score = MAX(score, hgtTestRatio);
+        // Check attitude corrections
+        const float tiltErrThreshold = 0.05f;
+        score = MAX(score, tiltErrFilt / tiltErrThreshold);
+    }
+
+    return score;
 }
 
 // provides the height limit to be observed by the control loops
@@ -73,6 +86,7 @@ void coreGetGyroBias(fpVector3_t *gyroBias)
         vectorZero(gyroBias);
         return;
     }
+    
     gyroBias->x = ekfStates.stateStruct.gyro_bias.x / dtEkfAvg;
     gyroBias->y = ekfStates.stateStruct.gyro_bias.y / dtEkfAvg;
     gyroBias->z = ekfStates.stateStruct.gyro_bias.z / dtEkfAvg;
@@ -145,7 +159,6 @@ void getWind(fpVector3_t *wind)
 }
 
 // return the NED velocity of the body frame origin in m/s
-//
 void coreGetVelNED(fpVector3_t *vel)
 {
     // correct for the IMU position offset (EKF calculations are at the IMU)
@@ -259,7 +272,7 @@ bool coreGetPosD(float *posD)
     {
         // The origin height is static and corrections are applied to the local vertical position
         // so that height returned by getLLH() = height returned by getOriginLLH - posD
-        *posD = outputDataNew.position.z + 0.01f * (float)EKF_origin.alt - (float)ekfGpsRefHgt;
+        *posD = outputDataNew.position.z + 0.01f * (float)EKF_origin.alt - ekfGpsRefHgt;
     }
 
     // Return the current height solution status

@@ -107,7 +107,6 @@ typedef struct
   uint8_t _framesPerPrediction;   // expected number of IMU frames per prediction
   uint32_t _frameTimeUsec;        // time per IMU frame
   uint16_t _imuTimeHz;            // IMU time in Hz
-  uint64_t imuSampleTime_us;      // time at start of current filter update
   gpsLocation_t common_EKF_origin;
   bool common_origin_valid;
 } ekfParam_t;

@@ -208,21 +208,44 @@ static inline void quaternionInitialise(fpQuaternion_t *quat)
 // Helper function to check if a value is close to zero
 static inline bool is_zero(float val)
 {
-  return fabsf(val) < 1e-6; // Adjust the tolerance level as needed
+  return fabsf(val) < __FLT_EPSILON__;
+}
+
+// Function to multiply two quaternions
+static inline fpQuaternion_t quaternion_multiply(fpQuaternion_t q1, const fpQuaternion_t q2)
+{
+  fpQuaternion_t ret;
+
+  const float w1 = q1.q0;
+  const float x1 = q1.q1;
+  const float y1 = q1.q2;
+  const float z1 = q1.q3;
+
+  const float w2 = q2.q0;
+  const float x2 = q2.q1;
+  const float y2 = q2.q2;
+  const float z2 = q2.q3;
+
+  ret.q0 = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2;
+  ret.q1 = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2;
+  ret.q2 = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2;
+  ret.q3 = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2;
+
+  return ret;
 }
 
 // Function to multiply two quaternions and store the result in the first quaternion
-static inline void quaternion_multiply_assign(fpQuaternion_t *q1, const fpQuaternion_t *q2)
+static inline void quaternion_multiply_assign(fpQuaternion_t *q1, const fpQuaternion_t q2)
 {
   const float w1 = q1->q0;
   const float x1 = q1->q1;
   const float y1 = q1->q2;
   const float z1 = q1->q3;
 
-  const float w2 = q2->q0;
-  const float x2 = q2->q1;
-  const float y2 = q2->q2;
-  const float z2 = q2->q3;
+  const float w2 = q2.q0;
+  const float x2 = q2.q1;
+  const float y2 = q2.q2;
+  const float z2 = q2.q3;
 
   q1->q0 = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2;
   q1->q1 = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2;
@@ -267,29 +290,11 @@ static inline void quaternion_normalize(fpQuaternion_t *q)
 }
 
 // create a quaternion from its axis-angle representation
-static inline void quaternion_from_axis_angle_helper(fpQuaternion_t *quat, fpVector3_t axis, float theta)
-{
-  // axis must be a unit vector as there is no check for length
-  if (is_zero(theta))
-  {
-    quat->q0 = 1.0f;
-    quat->q1 = quat->q2 = quat->q3 = 0.0f;
-    return;
-  }
-
-  const float st2 = sinf(0.5f * theta);
-
-  quat->q0 = cosf(0.5f * theta);
-  quat->q1 = axis.x * st2;
-  quat->q2 = axis.y * st2;
-  quat->q3 = axis.z * st2;
-}
-
-// create a quaternion from its axis-angle representation
 static inline void quaternion_from_axis_angle(fpQuaternion_t *quat, fpVector3_t v)
 {
   float theta = calc_length_pythagorean_3D(v.x, v.y, v.z);
-
+  
+  // axis must be a unit vector as there is no check for length
   if (is_zero(theta))
   {
     quat->q0 = 1.0f;
@@ -301,15 +306,20 @@ static inline void quaternion_from_axis_angle(fpQuaternion_t *quat, fpVector3_t 
   v.y /= theta;
   v.z /= theta;
 
-  quaternion_from_axis_angle_helper(quat, v, theta);
+  const float st2 = sinf(0.5f * theta);
+
+  quat->q0 = cosf(0.5f * theta);
+  quat->q1 = v.x * st2;
+  quat->q2 = v.y * st2;
+  quat->q3 = v.z * st2;
 }
 
 // rotate by the provided axis angle
-static inline void quaternion_rotate(fpQuaternion_t *quat, fpVector3_t v)
+static inline void quaternion_rotate(fpQuaternion_t *quat, const fpVector3_t v)
 {
   fpQuaternion_t r;
   quaternion_from_axis_angle(&r, v);
-  quaternion_multiply_assign(quat, &r);
+  quaternion_multiply_assign(quat, r);
 }
 
 // populate the supplied rotation matrix equivalent from this quaternion

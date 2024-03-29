@@ -4,9 +4,16 @@
         "cmath": "c",
         "ranges": "c",
         "navigation.h": "c",
-        "rth_trackback.h": "c"
+        "rth_trackback.h": "c",
         "platform.h": "c",
         "timer.h": "c",
-        "bus.h": "c"
+        "bus.h": "c",
+        "debug.h": "c",
+        "array": "c",
+        "istream": "c",
+        "locale": "c",
+        "tuple": "c",
+        "variant": "c",
+        "time.h": "c"
     }
 }

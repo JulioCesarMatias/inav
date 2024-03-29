@@ -335,7 +335,7 @@ void EKFGSF_yaw_predictAHRS(const uint8_t mdl_idx)
     }
 
     // Gyro bias estimation
-    const float gyro_bias_limit = RADIANS_TO_DEGREES(5.0f);
+    const float gyro_bias_limit = DEGREES_TO_RADIANS(5.0f);
     const float spinRate_squared = vector_squared_length(ang_rate_delayed_raw);
     if (spinRate_squared < sq(0.175f))
     {

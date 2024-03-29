@@ -85,57 +85,54 @@ void controlMagYawReset(void)
     // Perform a reset of magnetic field states and reset yaw to corrected magnetic heading
     if (magYawResetRequest || magStateResetRequest)
     {
-        if (magYawResetRequest || magStateResetRequest)
+        // get the euler angles from the current state estimate
+        fpVector3_t eulerAngles;
+        quaternionToEuler(ekfStates.stateStruct.quat, &eulerAngles.x, &eulerAngles.y, &eulerAngles.z);
+
+        // Use the Euler angles and magnetometer measurement to update the magnetic field states
+        // and get an updated quaternion
+        fpQuaternion_t newQuat = calcQuatAndFieldStates(eulerAngles.x, eulerAngles.y);
+
+        if (magYawResetRequest)
         {
-            // get the euler angles from the current state estimate
-            fpVector3_t eulerAngles;
-            quaternionToEuler(ekfStates.stateStruct.quat, &eulerAngles.x, &eulerAngles.y, &eulerAngles.z);
+            // previous value used to calculate a reset delta
+            fpQuaternion_t prevQuat = ekfStates.stateStruct.quat;
 
-            // Use the Euler angles and magnetometer measurement to update the magnetic field states
-            // and get an updated quaternion
-            fpQuaternion_t newQuat = calcQuatAndFieldStates(eulerAngles.x, eulerAngles.y);
+            // update the quaternion states using the new yaw angle
+            ekfStates.stateStruct.quat = newQuat;
 
-            if (magYawResetRequest)
+            // calculate the change in the quaternion state and apply it to the ouput history buffer
+            prevQuat = quaternionDivision(ekfStates.stateStruct.quat, prevQuat);
+            StoreQuatRotate(&prevQuat);
+
+            // send initial alignment status to OSD
+            if (!yawAlignComplete)
             {
-                // previous value used to calculate a reset delta
-                fpQuaternion_t prevQuat = ekfStates.stateStruct.quat;
+                sendEKFLogMessage("EKF IMU MAG initial yaw alignment complete");
+            }
 
-                // update the quaternion states using the new yaw angle
-                ekfStates.stateStruct.quat = newQuat;
+            // send in-flight yaw alignment status to OSD
+            if (finalResetRequest)
+            {
+                sendEKFLogMessage("EKF IMU MAG in-flight yaw alignment complete");
+            }
+            else if (interimResetRequest)
+            {
+                sendEKFLogMessage("EKF IMU MAG ground mag anomaly, yaw re-aligned");
+            }
 
-                // calculate the change in the quaternion state and apply it to the ouput history buffer
-                prevQuat = quaternionDivision(ekfStates.stateStruct.quat, prevQuat);
-                StoreQuatRotate(&prevQuat);
+            // update the yaw reset completed status
+            recordYawReset();
 
-                // send initial alignment status to OSD
-                if (!yawAlignComplete)
-                {
-                    strcpy(ekf_status_string, "EKF IMU MAG initial yaw alignment complete");
-                }
+            // clear the yaw reset request flag
+            magYawResetRequest = false;
 
-                // send in-flight yaw alignment status to OSD
-                if (finalResetRequest)
-                {
-                    strcpy(ekf_status_string, "EKF IMU MAG in-flight yaw alignment complete");
-                }
-                else if (interimResetRequest)
-                {
-                    strcpy(ekf_status_string, "EKF IMU MAG ground mag anomaly, yaw re-aligned");
-                }
-
-                // update the yaw reset completed status
-                recordYawReset();
-
-                // clear the yaw reset request flag
-                magYawResetRequest = false;
-
-                // clear the complete flags if an interim reset has been performed to allow subsequent
-                // and final reset to occur
-                if (interimResetRequest)
-                {
-                    finalInflightYawInit = false;
-                    finalInflightMagInit = false;
-                }
+            // clear the complete flags if an interim reset has been performed to allow subsequent
+            // and final reset to occur
+            if (interimResetRequest)
+            {
+                finalInflightYawInit = false;
+                finalInflightMagInit = false;
             }
         }
     }
@@ -173,7 +170,7 @@ void realignYawGPS(void)
             ResetPosition();
 
             // send yaw alignment information to OSD
-            strcpy(ekf_status_string, "EKF IMU yaw aligned to GPS velocity");
+            sendEKFLogMessage("EKF IMU yaw aligned to GPS velocity");
 
             // zero the attitude covariances because the correlations will now be invalid
             zeroAttCovOnly();
@@ -437,7 +434,7 @@ void FuseMagnetometer(void)
         if (obsIndex == 0)
         {
             // calculate observation jacobians
-            ZERO_FARRAY(H_MAG);
+            memset(&H_MAG, 0, sizeof(H_MAG));
             H_MAG[1] = SH_MAG[6] - *magD * SH_MAG[2] - *magN * SH_MAG[5];
             H_MAG[2] = *magE * SH_MAG[0] + *magD * SH_MAG[3] - *magN * (SH_MAG[8] - 2.0f * *q1 * *q2);
             H_MAG[16] = SH_MAG[1];
@@ -503,7 +500,7 @@ void FuseMagnetometer(void)
         else if (obsIndex == 1) // we are now fusing the Y measurement
         {
             // calculate observation jacobians
-            ZERO_FARRAY(H_MAG);
+            memset(&H_MAG, 0, sizeof(H_MAG));
             H_MAG[0] = *magD * SH_MAG[2] - SH_MAG[6] + *magN * SH_MAG[5];
             H_MAG[2] = -*magE * SH_MAG[4] - *magD * SH_MAG[7] - *magN * SH_MAG[1];
             H_MAG[16] = 2.0f * *q1 * *q2 - SH_MAG[8];
@@ -568,7 +565,7 @@ void FuseMagnetometer(void)
         else if (obsIndex == 2) // we are now fusing the Z measurement
         {
             // calculate observation jacobians
-            ZERO_FARRAY(H_MAG);
+            memset(&H_MAG, 0, sizeof(H_MAG));
             H_MAG[0] = *magN * (SH_MAG[8] - 2.0f * *q1 * *q2) - *magD * SH_MAG[3] - *magE * SH_MAG[0];
             H_MAG[1] = *magE * SH_MAG[4] + *magD * SH_MAG[7] + *magN * SH_MAG[1];
             H_MAG[16] = SH_MAG[5];
@@ -816,7 +813,7 @@ void fuseEulerYaw(void)
                 float gsfYaw, gsfYawVariance, velInnovLength;
                 if (EKFGSF_yaw_getYawData(&gsfYaw, &gsfYawVariance) &&
                     gsfYawVariance >= 0 &&
-                    gsfYawVariance < sq(RADIANS_TO_DEGREES(15.0f)) &&
+                    gsfYawVariance < sq(DEGREES_TO_RADIANS(15.0f)) &&
                     (assume_zero_sideslip() || (EKFGSF_yaw_getVelInnovLength(&velInnovLength) && velInnovLength < ekfParam.maxYawEstVelInnov)))
                 {
                     measured_yaw = gsfYaw;
@@ -889,7 +886,7 @@ void fuseEulerYaw(void)
                 float gsfYaw, gsfYawVariance, velInnovLength;
                 if (EKFGSF_yaw_getYawData(&gsfYaw, &gsfYawVariance) &&
                     gsfYawVariance >= 0 &&
-                    gsfYawVariance < sq(RADIANS_TO_DEGREES(15.0f)) &&
+                    gsfYawVariance < sq(DEGREES_TO_RADIANS(15.0f)) &&
                     (assume_zero_sideslip() || (EKFGSF_yaw_getVelInnovLength(&velInnovLength) && velInnovLength < ekfParam.maxYawEstVelInnov)))
                 {
                     measured_yaw = gsfYaw;
@@ -1259,12 +1256,12 @@ bool EKFGSF_resetMainFilterYaw(void)
     }
 
     float yawEKFGSF;
-    float yawVarianceEKFGSF; 
+    float yawVarianceEKFGSF;
     float velInnovLength;
 
     if (EKFGSF_yaw_getYawData(&yawEKFGSF, &yawVarianceEKFGSF) &&
         yawVarianceEKFGSF >= 0 &&
-        yawVarianceEKFGSF < sq(RADIANS_TO_DEGREES(15.0f)) &&
+        yawVarianceEKFGSF < sq(DEGREES_TO_RADIANS(15.0f)) &&
         (assume_zero_sideslip() || (EKFGSF_yaw_getVelInnovLength(&velInnovLength) && velInnovLength < ekfParam.maxYawEstVelInnov)))
     {
 
@@ -1278,11 +1275,11 @@ bool EKFGSF_resetMainFilterYaw(void)
 
         if (!ekf_useCompass())
         {
-            strcpy(ekf_status_string, "EKF IMU yaw aligned using GPS");
+            sendEKFLogMessage("EKF IMU yaw aligned using GPS");
         }
         else
         {
-            strcpy(ekf_status_string, "EKF IMU emergency yaw reset");
+            sendEKFLogMessage("EKF IMU emergency yaw reset");
         }
 
         // Fail the magnetomer so it doesn't get used and pull the yaw away from the correct value
@@ -1308,7 +1305,9 @@ void resetQuatStateYawOnly(float yaw, float yawVariance, bool isDeltaYaw)
 
     // check if we should use a 321 or 312 Rotation sequence and update the quaternion states using the preferred yaw definition
     quaternionToRotationMatrix(quaternion_inverse(ekfStates.stateStruct.quat), &prevTnb);
+
     fpVector3_t eulerAngles;
+
     if (fabsf(prevTnb.m[2][0]) < fabsf(prevTnb.m[2][1]))
     {
         // rolled more than pitched so use 321 rotation order

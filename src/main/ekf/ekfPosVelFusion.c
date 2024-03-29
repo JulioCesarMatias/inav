@@ -585,12 +585,14 @@ void FuseVelPosNED(void)
             }
             vectorZero(&tiltErrVec);
         }
+        
         if (fusePosData && posHealth)
         {
             fuseData[3] = true;
             fuseData[4] = true;
             vectorZero(&tiltErrVec);
         }
+
         if (fuseHgtData && hgtHealth)
         {
             fuseData[5] = true;
@@ -679,8 +681,10 @@ void FuseVelPosNED(void)
                         KHP[i][j] = Kfusion[i] * P[stateIndex][j];
                     }
                 }
+
                 // Check that we are not going to drive any variances negative and skip the update if so
                 bool healthyFusion = true;
+
                 for (uint8_t i = 0; i <= stateIndexLim; i++)
                 {
                     if (KHP[i][i] > P[i][i])
@@ -688,6 +692,7 @@ void FuseVelPosNED(void)
                         healthyFusion = false;
                     }
                 }
+
                 if (healthyFusion)
                 {
                     // update the covariance matrix
@@ -725,6 +730,7 @@ void FuseVelPosNED(void)
                         tiltErrVec.y += ekfStates.stateStruct.angErr.y;
                         tiltErrVec.z += ekfStates.stateStruct.angErr.z;
                     }
+
                     // record good fusion status
                     if (obsIndex == 0)
                     {

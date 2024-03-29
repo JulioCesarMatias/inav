@@ -38,6 +38,7 @@ void calcGpsGoodToAlign(void)
     {
         magYawResetTimer_ms = imuSampleTime_ms;
     }
+
     if ((imuSampleTime_ms - magYawResetTimer_ms > 5000) && !motorsArmed)
     {
         // request reset of heading and magnetic field states
@@ -67,11 +68,12 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (gpsDriftFail)
     {
-        strcpy(ekf_status_string, "EKF GPS drift");
+        sendEKFLogMessage("EKF GPS drift");
     }
 
     // Check that the vertical GPS vertical velocity is reasonable after noise filtering
     bool gpsVertVelFail;
+
     if (gpsSol.flags.validVelD && onGround)
     {
         // check that the average vertical GPS velocity is close to zero
@@ -88,12 +90,13 @@ void calcGpsGoodToAlign(void)
     if (gpsVertVelFail)
     {
 
-        strcpy(ekf_status_string, "EKF GPS vertical speed fail");
+        sendEKFLogMessage("EKF GPS vertical speed fail");
     }
 
     // Check that the horizontal GPS vertical velocity is reasonable after noise filtering
     // This check can only be used if the vehicle is stationary
     bool gpsHorizVelFail;
+
     if (onGround)
     {
         gpsHorizVelFilt = 0.1f * calc_length_pythagorean_2D(gpsDataDelayed.vel.x, gpsDataDelayed.vel.y) + 0.9f * gpsHorizVelFilt;
@@ -108,12 +111,13 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (gpsHorizVelFail)
     {
-        strcpy(ekf_status_string, "EKF GPS horizontal speed fail");
+        sendEKFLogMessage("EKF GPS horizontal speed fail");
     }
 
     // fail if horiziontal position accuracy not sufficient
     float hAcc = gpsSolDRV.eph / 10;
     bool hAccFail;
+
     if (gpsSol.flags.validVelNE)
     {
         hAccFail = (hAcc > 5.0f * checkScaler) && (ekfParam._gpsCheck & MASK_GPS_POS_ERR);
@@ -126,20 +130,22 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (hAccFail)
     {
-        strcpy(ekf_status_string, "EKF GPS horizontal acc error");
+        sendEKFLogMessage("EKF GPS horizontal acc error");
     }
 
     // Check for vertical GPS accuracy
     float vAcc = gpsSolDRV.epv / 10;
     bool vAccFail = false;
+
     if (gpsSol.flags.validVelD)
     {
         vAccFail = (vAcc > 7.5f * checkScaler) && (ekfParam._gpsCheck & MASK_GPS_POS_ERR);
     }
+
     // Report check result as a text string and bitmask
     if (vAccFail)
     {
-        strcpy(ekf_status_string, "EKF GPS vertical acc error");
+        sendEKFLogMessage("EKF GPS vertical acc error");
     }
 
     // fail if reported speed accuracy greater than threshold
@@ -148,7 +154,7 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (gpsSpdAccFail)
     {
-        strcpy(ekf_status_string, "EKF GPS speed error");
+        sendEKFLogMessage("EKF GPS speed error");
     }
 
     // fail if satellite geometry is poor
@@ -157,7 +163,7 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (hdopFail)
     {
-        strcpy(ekf_status_string, "EKF GPS HDOP error");
+        sendEKFLogMessage("EKF GPS HDOP error");
     }
 
     // fail if not enough sats
@@ -166,7 +172,7 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (numSatsFail)
     {
-        strcpy(ekf_status_string, "EKF GPS num sats error");
+        sendEKFLogMessage("EKF GPS num sats error");
     }
 
     // fail if magnetometer innovations are outside limits indicating bad yaw
@@ -184,13 +190,13 @@ void calcGpsGoodToAlign(void)
     // Report check result as a text string and bitmask
     if (yawFail)
     {
-        strcpy(ekf_status_string, "EKF mag yaw error");
+        sendEKFLogMessage("EKF mag yaw error");
     }
 
     // assume failed first time through and notify user checks have started
     if (lastGpsVelFail_ms == 0)
     {
-        strcpy(ekf_status_string, "EKF starting GPS checks");
+        sendEKFLogMessage("EKF starting GPS checks");
         lastGpsVelFail_ms = imuSampleTime_ms;
     }
 
@@ -224,16 +230,19 @@ void calcGpsGoodForFlight(void)
     // set up varaibles and constants used by filter that is applied to GPS speed accuracy
     const float alpha1 = 0.2f; // coefficient for first stage LPF applied to raw speed accuracy data
     const float tau = 10.0f;   // time constant (sec) of peak hold decay
+
     if (lastGpsCheckTime_ms == 0)
     {
         lastGpsCheckTime_ms = imuSampleTime_ms;
     }
+
     float dtLPF = (imuSampleTime_ms - lastGpsCheckTime_ms) * 1e-3f;
     lastGpsCheckTime_ms = imuSampleTime_ms;
     float alpha2 = constrainf(dtLPF / tau, 0.0f, 1.0f);
 
     // get the receivers reported speed accuracy
     float gpsSpdAccRaw = gpsSol.speed_accuracy * 0.01f;
+
     if (!gpsSol.speed_accuracy)
     {
         gpsSpdAccRaw = 0.0f;
@@ -262,6 +271,7 @@ void calcGpsGoodForFlight(void)
         lastInnovFailTime_ms = imuSampleTime_ms;
         lastInnovPassTime_ms = imuSampleTime_ms;
     }
+
     if (velTestRatio < 1.0f && posTestRatio < 1.0f)
     {
         lastInnovPassTime_ms = imuSampleTime_ms;
@@ -270,6 +280,7 @@ void calcGpsGoodForFlight(void)
     {
         lastInnovFailTime_ms = imuSampleTime_ms;
     }
+
     if ((imuSampleTime_ms - lastInnovPassTime_ms) > 1000)
     {
         ekfInnovationsPass = false;

@@ -354,7 +354,7 @@ void readIMUData(void)
         imuDataDownSampledNew.time_ms = imuSampleTime_ms;
 
         // Write data to the FIFO IMU buffer
-        ekf_imu_buffer_push_youngest_element(&storedIMU, &imuDataDownSampledNew, IMU_RING_BUFFER);
+        ekf_imu_buffer_push_youngest_element(&storedIMU, &imuDataDownSampledNew);
 
         // calculate the achieved average time step rate for the EKF
         float dtNow = constrainf(0.5f * (imuDataDownSampledNew.delAngDT + imuDataDownSampledNew.delVelDT), 0.0f, 10.0f * EKF_TARGET_DT);
@@ -375,7 +375,7 @@ void readIMUData(void)
         runUpdates = true;
 
         // extract the oldest available data from the FIFO buffer
-        ekf_imu_buffer_get_oldest_element(&storedIMU, &imuDataDelayed, IMU_RING_BUFFER);
+        ekf_imu_buffer_get_oldest_element(&storedIMU, &imuDataDelayed);
 
         // protect against delta time going to zero
         // TODO - check if calculations can tolerate 0
@@ -587,7 +587,7 @@ void readGpsData(void)
         }
         else
         {
-            strcpy(ekf_status_string, "EKF waiting for 3D fix");
+            sendEKFLogMessage("EKF waiting for 3D fix");
         }
     }
 }
@@ -595,38 +595,36 @@ void readGpsData(void)
 // read the delta velocity and corresponding time interval from the IMU
 void readDeltaVelocity(fpVector3_t *dVel, float *dVel_dt)
 {
-    fpVector3_t getAcc;
-    accGetMeasuredAcceleration(&getAcc); // Calculate accel in body frame in cm/s
+    const float acc_dt = (float)getTaskDeltaTime(TASK_PID) * 1.0e-6f;
+    accGetMeasuredAcceleration(dVel); // Calculate accel in body frame in cm/s
 
     // convert the accel in body frame in cm/s to m/s
-    getAcc.x = CENTIMETERS_TO_METERS(getAcc.x);
-    getAcc.y = CENTIMETERS_TO_METERS(getAcc.y);
-    getAcc.z = CENTIMETERS_TO_METERS(getAcc.z);
+    dVel->x *= 0.01f;
+    dVel->y *= 0.01f;
+    dVel->z *= 0.01f;
 
-    *dVel_dt = getTaskDeltaTime(TASK_PID) * 1.0e-6f;
+    dVel->x *= acc_dt;
+    dVel->y *= acc_dt;
+    dVel->z *= acc_dt;
+
+    *dVel_dt = acc_dt;
     *dVel_dt = MAX(*dVel_dt, 1.0e-4f);
     *dVel_dt = MIN(*dVel_dt, 1.0e-1f);
-
-    dVel->x = getAcc.x * *dVel_dt;
-    dVel->y = getAcc.y * *dVel_dt;
-    dVel->z = -getAcc.z * *dVel_dt;
 }
 
 // read the delta angle and corresponding time interval from the IMU
 void readDeltaAngle(fpVector3_t *dAng, float *dAng_dt)
 {
-    fpVector3_t getGyro;
-    gyroGetMeasuredRotationRate(&getGyro); // Calculate gyro rate in body frame in rad/s
-    
-    // Even if the gyro runs in a different task than the acc, we still need to keep the gyro update rate the same as the acc. 
-    // Otherwise, the EKF will have problems with the outputs.
-    *dAng_dt = getTaskDeltaTime(TASK_PID) * 1.0e-6f;
+    const float gyro_dt = (float)getTaskDeltaTime(TASK_GYRO) * 1.0e-6f;
+    gyroGetMeasuredRotationRate(dAng); // Calculate gyro rate in body frame in rad/s
+
+    dAng->x *= gyro_dt;
+    dAng->y *= gyro_dt;
+    dAng->z *= gyro_dt;
+
+    *dAng_dt = gyro_dt;
     *dAng_dt = MAX(*dAng_dt, 1.0e-4f);
     *dAng_dt = MIN(*dAng_dt, 1.0e-1f);
-
-    dAng->x = getGyro.x * *dAng_dt;
-    dAng->y = getGyro.y * *dAng_dt;
-    dAng->z = -getGyro.z * *dAng_dt;
 }
 
 // check for new pressure altitude measurement data and update stored measurement if available
@@ -790,10 +788,4 @@ float MagDeclination(void)
     }
 
     return compassConfig()->mag_declination;
-}
-
-// Writes the default equivalent airspeed in m/s to be used in forward flight if a measured airspeed is required and not available.
-void writeDefaultAirSpeed(float airspeed)
-{
-    defaultAirSpeed = airspeed;
 }
