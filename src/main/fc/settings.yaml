@@ -1606,6 +1606,7 @@ groups:
   - name: PG_EKF_CONFIG
     type: ekfConfig_t
     headers: [ "navigation/ekf.h" ]
+    condition: USE_EXTENDED_KALMAN_FILTER
     members:
       - name: ekf_enabled
         description: "Extended Kalman Filter ON/OFF"

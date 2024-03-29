@@ -76,7 +76,9 @@
 #include "fc/settings.h"
 
 #include "navigation/navigation.h"
+#if defined(USE_EXTENDED_KALMAN_FILTER)
 #include "navigation/ekf.h"
+#endif
 
 #ifndef DEFAULT_FEATURES
 #define DEFAULT_FEATURES 0
@@ -184,12 +186,14 @@ __attribute__((weak)) void targetConfiguration(void)
 
 uint32_t getLooptime(void)
 {
+#if defined(USE_EXTENDED_KALMAN_FILTER)
     uint16_t newLooptime;
     
     if (ekf_getLoopTime(&newLooptime))
     {
         return newLooptime;
     }
+#endif
 
     return gyroConfig()->looptime;
 }

@@ -42,7 +42,9 @@
 
 #include "io/gps.h"
 
+#if defined(USE_EXTENDED_KALMAN_FILTER)
 #include "navigation/ekf.h"
+#endif
 #include "navigation/navigation.h"
 #include "navigation/navigation_private.h"
 #include "navigation/navigation_pos_estimator_private.h"
@@ -255,7 +257,9 @@ void onNewGPSData(void)
             if (positionEstimationConfig()->automatic_mag_declination && !magDeclinationSet) {
                 const float declination = geoCalculateMagDeclination(&newLLH);
                 imuSetMagneticDeclination(declination);
+#if defined(USE_EXTENDED_KALMAN_FILTER)
                 ekf_setMagDeclination(declination);
+#endif
                 magDeclinationSet = true;
             }
         }

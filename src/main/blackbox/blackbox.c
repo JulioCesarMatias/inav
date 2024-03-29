@@ -66,7 +66,9 @@
 #include "io/beeper.h"
 #include "io/gps.h"
 
+#if defined(USE_EXTENDED_KALMAN_FILTER)
 #include "navigation/ekf.h"
+#endif
 #include "navigation/navigation.h"
 
 #include "rx/rx.h"
@@ -374,6 +376,7 @@ static const blackboxDeltaFieldDefinition_t blackboxMainFields[] = {
     {"navAcc",     1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_ACC},
     {"navAcc",     2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_ACC},
 
+#if defined(USE_EXTENDED_KALMAN_FILTER)
     {"ekfAttitude",   0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
     {"ekfAttitude",   1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
     {"ekfAttitude",   2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
@@ -389,6 +392,7 @@ static const blackboxDeltaFieldDefinition_t blackboxMainFields[] = {
     {"ekfGroundSpeed", -1, SIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
     {"ekfWind",        0, SIGNED,  .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
     {"ekfWind",        1, SIGNED,  .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+#endif
 };
 
 #ifdef USE_GPS
@@ -540,12 +544,14 @@ typedef struct blackboxMainState_s {
     int16_t navHeading;
     uint16_t navTargetHeading;
     int16_t navSurface;
+#if defined(USE_EXTENDED_KALMAN_FILTER)
     int16_t ekfAttitude[XYZ_AXIS_COUNT];
     int16_t ekfGyroBias[XYZ_AXIS_COUNT];
     int32_t ekfNavPos[XYZ_AXIS_COUNT];
     int16_t ekfNavVel[XYZ_AXIS_COUNT];
     int16_t ekfGroundSpeed;
     int16_t ekfWind[2];
+#endif
 } blackboxMainState_t;
 
 typedef struct blackboxGpsState_s {
@@ -1009,6 +1015,7 @@ static void writeIntraframe(void)
         }
     }
 
+#if defined(USE_EXTENDED_KALMAN_FILTER)
     if (testBlackboxCondition(FLIGHT_LOG_FIELD_CONDITION_ATTITUDE)) {
         blackboxWriteSigned16VBArray(blackboxCurrent->ekfAttitude, XYZ_AXIS_COUNT);
         blackboxWriteSigned16VBArray(blackboxCurrent->ekfGyroBias, XYZ_AXIS_COUNT);
@@ -1025,6 +1032,7 @@ static void writeIntraframe(void)
         blackboxWriteSignedVB(blackboxCurrent->ekfWind[X]);
         blackboxWriteSignedVB(blackboxCurrent->ekfWind[Y]);
     }
+#endif
 
     //Rotate our history buffers:
 
@@ -1283,6 +1291,7 @@ static void writeInterframe(void)
         }
     }
 
+#if defined(USE_EXTENDED_KALMAN_FILTER)
     if (testBlackboxCondition(FLIGHT_LOG_FIELD_CONDITION_ATTITUDE)) {
         blackboxWriteArrayUsingAveragePredictor16(offsetof(blackboxMainState_t, ekfAttitude), XYZ_AXIS_COUNT);
         blackboxWriteArrayUsingAveragePredictor16(offsetof(blackboxMainState_t, ekfGyroBias), XYZ_AXIS_COUNT);
@@ -1299,6 +1308,7 @@ static void writeInterframe(void)
         blackboxWriteSignedVB(blackboxCurrent->ekfWind[X] - blackboxLast->ekfWind[X]);
         blackboxWriteSignedVB(blackboxCurrent->ekfWind[Y] - blackboxLast->ekfWind[Y]);
     }
+#endif
 
     //Rotate our history buffers
     blackboxHistory[2] = blackboxHistory[1];
@@ -1741,7 +1751,8 @@ static void loadMainState(timeUs_t currentTimeUs)
     }
     blackboxCurrent->navTargetHeading = navDesiredHeading;
     blackboxCurrent->navSurface = navActualSurface;
-    
+
+#if defined(USE_EXTENDED_KALMAN_FILTER) 
     fpVector3_t ekfEulerAngles;
     fpVector3_t ekfGyroBias;
     fpVector3_t ekfPos;
@@ -1775,6 +1786,7 @@ static void loadMainState(timeUs_t currentTimeUs)
     blackboxCurrent->ekfGroundSpeed = CENTIMETERS_TO_METERS(calc_length_pythagorean_2D(ekfVel.x, ekfVel.y));
     blackboxCurrent->ekfWind[X] = CENTIMETERS_TO_METERS(ekfWind.x);
     blackboxCurrent->ekfWind[Y] = CENTIMETERS_TO_METERS(ekfWind.y);
+#endif
 }
 
 /**

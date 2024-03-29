@@ -53,7 +53,9 @@
 #include "io/beeper.h"
 #include "io/gps.h"
 
+#if defined(USE_EXTENDED_KALMAN_FILTER)
 #include "navigation/ekf.h"
+#endif
 #include "navigation/navigation.h"
 #include "navigation/navigation_private.h"
 
@@ -2322,11 +2324,14 @@ const navEstimatedPosVel_t * navGetCurrentActualPositionAndVelocity(void)
 
     if (posControl.flags.isTerrainFollowEnabled) {
         retPosVel = &posControl.actualState.agl;
-    } else {
+    }
+#if defined(USE_EXTENDED_KALMAN_FILTER)
+    else {
         if (ekf_HealthyToUse()) {
             //retPosVel = &ekfPosVel;
         }
     }
+#endif
     
     return retPosVel;
 }

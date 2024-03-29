@@ -72,7 +72,9 @@
 
 #include "msp/msp_serial.h"
 
+#if defined(USE_EXTENDED_KALMAN_FILTER)
 #include "navigation/ekf.h"
+#endif
 #include "navigation/navigation.h"
 
 #include "rx/rx.h"
@@ -913,7 +915,9 @@ void taskMainPidLoop(timeUs_t currentTimeUs)
     imuUpdateAccelerometer();
     imuUpdateAttitude(dT);
 
+#if defined(USE_EXTENDED_KALMAN_FILTER)
     ekf_Update(dT);
+#endif
 
 #if defined(SITL_BUILD)
     }

@@ -183,6 +183,8 @@
 
 #define USE_CMS_FONT_PREVIEW
 
+#define USE_EZ_TUNE
+
 //Designed to free space of F722 and F411 MCUs
 #if (MCU_FLASH_SIZE > 512)
 #define USE_VTX_FFPV
@@ -194,4 +196,7 @@
 #elif !defined(STM32F7)
 #define MAX_MIXER_PROFILE_COUNT 1
 #endif
-#define USE_EZ_TUNE
+
+#if defined(STM32H7)
+#define USE_EXTENDED_KALMAN_FILTER
+#endif

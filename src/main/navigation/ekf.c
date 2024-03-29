@@ -266,17 +266,12 @@ bool forceEKFDisable(void)
     return sensors(SENSOR_RANGEFINDER) || sensors(SENSOR_OPFLOW) || STATE(ROVER) || STATE(BOAT);
 }
 
-// This function is used to force the PID Task to run at max 400Hz (F4) or 1Khz (H7) when the EKF is active.
+// This function is used to force the PID Task to run at max 1Khz in H743 when the EKF is active.
 bool ekf_getLoopTime(uint16_t *newLoopTime)
 {
     if (ekfConfig()->ekfEnabled && !forceEKFDisable())
     {
-#if defined(STM32H7)
         *newLoopTime = MAX(1000, gyroConfig()->looptime);
-#else
-        *newLoopTime = MAX(2500, gyroConfig()->looptime);
-#endif
-
         return true;
     }
 
@@ -6054,6 +6049,10 @@ void ekf_Update(float deltaTime)
             {
                 ekf_eulers_z += 3600;
             }
+
+            debug[1] = RADIANS_TO_DECIDEGREES(ekf_eulers.x);
+            debug[2] = RADIANS_TO_DECIDEGREES(ekf_eulers.y);
+            debug[3] = ekf_eulers_z / 10;
 
             float velVar;
             float posVar;

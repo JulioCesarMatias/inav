@@ -64,7 +64,9 @@
 #include "sensors/gyro.h"
 #include "sensors/sensors.h"
 
+#if defined(USE_EXTENDED_KALMAN_FILTER)
 #include "navigation/ekf.h"
+#endif
 
 /*
  *      X-axis = North/Forward
@@ -854,9 +856,11 @@ float calculateCosTiltAngle(void)
 {
     fpQuaternion_t quatRet = orientation;
 
+#if defined(USE_EXTENDED_KALMAN_FILTER)
     if (ekf_HealthyToUse()) {
         //quatRet = ekf_getQuaternion();
     }
+#endif
 
     return 1.0f - 2.0f * sq(quatRet.q1) - 2.0f * sq(quatRet.q2);
 }
