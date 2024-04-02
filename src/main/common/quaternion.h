@@ -104,6 +104,24 @@ static inline fpQuaternion_t * quaternionMultiply(fpQuaternion_t * result, const
   return result;
 }
 
+static inline void quaternion_multiply_assign(fpQuaternion_t *q1, const fpQuaternion_t q2)
+{
+  const float w1 = q1->q0;
+  const float x1 = q1->q1;
+  const float y1 = q1->q2;
+  const float z1 = q1->q3;
+
+  const float w2 = q2.q0;
+  const float x2 = q2.q1;
+  const float y2 = q2.q2;
+  const float z2 = q2.q3;
+
+  q1->q0 = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2;
+  q1->q1 = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2;
+  q1->q2 = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2;
+  q1->q3 = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2;
+}
+
 static inline fpQuaternion_t * quaternionScale(fpQuaternion_t * result, const fpQuaternion_t * a, const float b)
 {
     fpQuaternion_t p;
@@ -245,8 +263,9 @@ static inline void quaternionToEuler(fpQuaternion_t q, float *roll, float *pitch
     *yaw = atan2_approx(2.0f * (q.q0 * q.q3 + q.q1 * q.q2), 1.0f - 2.0f * (q.q2 * q.q2 + q.q3 * q.q3));
 }
 
-static inline void quaternionFromAxisAngle(fpVector3_t v, fpQuaternion_t *q) {
-    float theta = fast_fsqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
+static inline void quaternionFromAxisAngle(fpVector3_t v, fpQuaternion_t *q)
+{
+    float theta = calc_length_pythagorean_3D(v.x, v.y, v.z);
 
     if (theta < 1.0e-12f) {
         q->q0 = 1.0f;
@@ -254,7 +273,10 @@ static inline void quaternionFromAxisAngle(fpVector3_t v, fpQuaternion_t *q) {
         return;
     }
 
-    vectorNormalize(&v, &v);
+    v.x /= theta;
+    v.y /= theta;
+    v.z /= theta;
+
     float st2 = sin_approx(theta * 0.5f);
 
     q->q0 = cos_approx(theta * 0.5f);

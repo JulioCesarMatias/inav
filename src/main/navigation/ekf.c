@@ -20,7 +20,6 @@
 
 #include "navigation/ekf.h"
 
-#include "build/debug.h"
 #include "common/matrix.h"
 #include "config/parameter_group.h"
 #include "config/parameter_group_ids.h"
@@ -62,7 +61,7 @@ typedef union
 {
     Vector31 statesArray;
     state_elements_t stateStruct;
-} ekfStates_U;
+} ekfStates_t;
 
 // states held by magnetomter fusion across time steps
 // magnetometer X,Y,Z measurements are fused across three time steps
@@ -101,7 +100,7 @@ state_elements_t statesAtPosTime;      // states at the effective time of posNE 
 state_elements_t statesAtHgtTime;      // states at the effective time of hgtMeas measurement
 state_elements_t statesAtMagMeasTime;  // filter states at the effective time of compass measurements
 state_elements_t statesAtViasMeasTime; // filter states at the effective measurement time
-ekfStates_U ekfStates;                 // union of fusion states
+ekfStates_t ekfStates;                 // union of fusion states
 mag_state_t mag_state;                 // EKF magnetometer fusion states
 navEstimatedPosVel_t ekfPosVel;        // EKF pos and vel to use in navigation modes
 fault_status_t faultStatus;            // EKF fusions status
@@ -152,6 +151,7 @@ bool ekf_started;              // boolean true when EKF have been initialised
 bool statesInitialised;        // boolean true when filter states have been initialised
 bool vehicleArmed;             // boolean to force position and velocity measurements to zero for pre-arm or bench testing
 bool prevVehicleArmed;         // value of vehicleArmed from last update
+bool prev_armed;               // value of vehicleArmed from last update
 bool covPredStep;              // boolean set to true when a covariance prediction step has been performed
 bool yawAligned;               // true when the yaw angle has been aligned
 bool newDataMag;               // true when new magnetometer data has arrived
@@ -197,6 +197,8 @@ uint8_t gpsUpdateCountMax;  // limit on the number of minor state corrections us
 uint8_t hgtUpdateCount;     // count of the number of minor state corrections using Baro data
 uint8_t hgtUpdateCountMax;  // limit on the number of minor state corrections using Baro data
 uint8_t storeIndex;         // state vector storage index
+
+int16_t ekfPerfTime_us; // EKF performance time monitor in microseconds
 
 float dt;                          // time lapsed since the last covariance prediction (sec)
 float dtIMUavg;                    // expected time between IMU measurements (sec)
@@ -255,23 +257,36 @@ timeMs_t BETAmsecPrev;                // time stamp of last synthetic sideslip f
 timeUs_t lastMagUpdate_us;   // last time compass was updated
 timeUs_t lastHgtMeasTime_us; // time of last height measurement used to determine if new data has arrived
 
+// monitoring IMU quality
+typedef enum
+{
+    EKF_USE_IMU_MIXED = 0, // IMU 1 & 2 are mixed
+    EKF_USE_IMU1,          // only IMU 1 is used
+    EKF_USE_IMU2           // only IMU 2 is used
+} ImuSwitchState_e;
+
+ImuSwitchState_e ImuSwitchState; // IMU switch state
+float imuNoiseFiltState1;        // peak hold noise estimate for IMU 1
+float imuNoiseFiltState2;        // peak hold noise estimate for IMU 2
+fpVector3_t accelDiffFilt;       // filtered difference between IMU 1 and 2
+
 PG_REGISTER_WITH_RESET_TEMPLATE(ekfConfig_t, ekfConfig, PG_EKF_CONFIG, 0);
 
 PG_RESET_TEMPLATE(ekfConfig_t, ekfConfig,
                   .ekfEnabled = SETTING_EKF_ENABLED_DEFAULT, );
-                  
+
 // Forces EKF to disable if the following settings are enabled. The reason for this procedure is because this EKF still does not fuse these sensors.
-bool forceEKFDisable(void)
+static bool forceEKFDisable(void)
 {
-    return sensors(SENSOR_RANGEFINDER) || sensors(SENSOR_OPFLOW) || STATE(ROVER) || STATE(BOAT);
+    return sensors(SENSOR_RANGEFINDER) || sensors(SENSOR_OPFLOW);
 }
 
-// This function is used to force the PID Task to run at max 1Khz in H743 when the EKF is active.
+// This function is used to force the PID Task to run at max 2Khz in H743 when the EKF is active.
 bool ekf_getLoopTime(uint16_t *newLoopTime)
 {
     if (ekfConfig()->ekfEnabled && !forceEKFDisable())
     {
-        *newLoopTime = MAX(1000, gyroConfig()->looptime);
+        *newLoopTime = MAX(500, gyroConfig()->looptime);
         return true;
     }
 
@@ -284,54 +299,58 @@ void ekf_setMagDeclination(float declination)
 }
 
 // return true if we should use the magnetometer sensor
-bool ekf_useCompass(void)
+static bool ekf_useCompass(void)
 {
     return sensors(SENSOR_MAG) && compassIsCalibrationComplete();
 }
 
 // return true if we should use the barometer sensor
-bool ekf_useBarometer(void)
+static bool ekf_useBarometer(void)
 {
     return sensors(SENSOR_BARO) && baro.calibrationFinished;
 }
 
 // return true if we should use the airspeed sensor
-bool ekf_useAirspeed(void)
+static bool ekf_useAirspeed(void)
 {
     return sensors(SENSOR_PITOT) && pitot.calibrationFinished;
 }
 
 // 120ms for UBLOX7, UBLOXM8, UBLOXM9 and UBLOXM10
 // 110ms for GPS MSP
-timeMs_t ekf_getGPSDelay(void)
+static timeMs_t ekf_getGPSDelay(void)
 {
     return gpsConfig()->provider == GPS_MSP ? 110 : 120;
 }
 
-// wrap an angle defined in radians to -PI ~ PI (equivalent to +- 180 degrees)
-float wrap_PI(float angle_in_radians)
+// wrap an angle defined in radians to -PI ~ PI
+static inline float wrap_2PI(const float radian)
 {
-    if (angle_in_radians > 10 * M_PIf || angle_in_radians < -10 * M_PIf)
+    float res = fmodf(radian, 2 * M_PIf);
+
+    if (res < 0)
     {
-        // for very large numbers use modulus
-        angle_in_radians = fmodf(angle_in_radians, 2 * M_PIf);
+        res += 2 * M_PIf;
     }
 
-    while (angle_in_radians > M_PIf)
+    return res;
+}
+
+// wrap an angle defined in radians to -PI ~ PI
+static inline float wrap_PI(const float radian)
+{
+    float res = wrap_2PI(radian);
+
+    if (res > M_PI)
     {
-        angle_in_radians -= 2 * M_PIf;
+        res -= 2 * M_PIf;
     }
 
-    while (angle_in_radians < -M_PIf)
-    {
-        angle_in_radians += 2 * M_PIf;
-    }
-
-    return angle_in_radians;
+    return res;
 }
 
 // align the NE earth magnetic field states with the published declination
-void ekf_alignMagStateDeclination(void)
+static void ekf_alignMagStateDeclination(void)
 {
     // get the magnetic declination
     const float magDecAng = ekf_useCompass() ? ekfMagDeclination : 0.0f;
@@ -344,7 +363,7 @@ void ekf_alignMagStateDeclination(void)
 }
 
 // return the distance in meters in North/East plane as a N/E vector
-fpVector2_t ekf_LocationDiff(const gpsOrigin_t loc1, const gpsLocation_t loc2)
+static fpVector2_t ekf_LocationDiff(const gpsOrigin_t loc1, const gpsLocation_t loc2)
 {
     fpVector2_t loc_diff;
 
@@ -367,7 +386,7 @@ return the filter fault status as a bitmasked integer
  7 = badly conditioned synthetic sideslip fusion
  7 = filter is not initialised
 */
-uint16_t ekf_getFilterFaults(void)
+static uint16_t ekf_getFilterFaults(void)
 {
     return ((isnan(ekfStates.stateStruct.quat.q0) || isnan(ekfStates.stateStruct.quat.q1) || isnan(ekfStates.stateStruct.quat.q2) || isnan(ekfStates.stateStruct.quat.q3)) << 0 |
             (isnan(ekfStates.stateStruct.velocity.x) || isnan(ekfStates.stateStruct.velocity.y) || isnan(ekfStates.stateStruct.velocity.z)) << 1 |
@@ -390,7 +409,7 @@ void ekf_getVariances(float *velVar, float *posVar, float *hgtVar, float *magVar
 }
 
 // zero specified range of rows in the state covariance matrix
-void ekf_zeroRows(Matrix22 covMat, uint8_t first, uint8_t last)
+static void ekf_zeroRows(Matrix22 covMat, uint8_t first, uint8_t last)
 {
     for (uint8_t row = first; row <= last; row++)
     {
@@ -399,7 +418,7 @@ void ekf_zeroRows(Matrix22 covMat, uint8_t first, uint8_t last)
 }
 
 // zero specified range of columns in the state covariance matrix
-void ekf_zeroCols(Matrix22 covMat, uint8_t first, uint8_t last)
+static void ekf_zeroCols(Matrix22 covMat, uint8_t first, uint8_t last)
 {
     for (uint8_t row = 0; row <= 21; row++)
     {
@@ -407,8 +426,8 @@ void ekf_zeroCols(Matrix22 covMat, uint8_t first, uint8_t last)
     }
 }
 
-// Check basic filter health metrics and return a consolidated health status
-bool ekf_healthy(void)
+// check basic filter health metrics and return a consolidated health status
+static bool ekf_healthy(void)
 {
     const uint16_t faultInt = ekf_getFilterFaults();
 
@@ -441,7 +460,7 @@ bool ekf_HealthyToUse(void)
 }
 
 // calculate the NED earth spin vector in rad/sec
-void ekf_calcEarthRateNED(fpVector3_t *omega, float latitude)
+static void ekf_calcEarthRateNED(fpVector3_t *omega, float latitude)
 {
     float lat_rad = DEGREES_TO_RADIANS(latitude);
     omega->x = EARTH_RATE * cos_approx(lat_rad);
@@ -450,7 +469,7 @@ void ekf_calcEarthRateNED(fpVector3_t *omega, float latitude)
 }
 
 // recall state vector stored at closest time to the one specified by msec
-void ekf_RecallStates(state_elements_t *statesForFusion, timeMs_t msec)
+static void ekf_RecallStates(state_elements_t *statesForFusion, timeMs_t msec)
 {
     timeMs_t timeDelta;
     timeMs_t bestTimeDelta = 200;
@@ -477,14 +496,14 @@ void ekf_RecallStates(state_elements_t *statesForFusion, timeMs_t msec)
 }
 
 // update IMU delta angle and delta velocity measurements
-void ekf_readIMUData(void)
+static void ekf_readIMUData(void)
 {
     fpVector3_t angRate; // angular rate vector in XYZ body axes measured by the IMU (rad/s)
     fpVector3_t accel1;  // acceleration vector in XYZ body axes measured by IMU1 (m/s^2)
     fpVector3_t accel2;  // acceleration vector in XYZ body axes measured by IMU2 (m/s^2)
 
     // the imu sample time is sued as a common time reference throughout the filter
-    imuSampleTime_ms = millis();
+    imuSampleTime_ms = US2MS(micros());
 
     gyroGetMeasuredRotationRate(&angRate); // Calculate gyro rate in body frame in rad/s
     accGetMeasuredAcceleration(&accel1);   // Calculate accel in body frame in cm/s
@@ -520,10 +539,52 @@ void ekf_readIMUData(void)
     lastAccel2.x = accel2.x;
     lastAccel2.y = accel2.y;
     lastAccel2.z = accel2.z;
+
+    float accelDiffLength = 0.0f;
+
+    // Check the difference for excessive error and use the IMU with less noise
+    // Apply hysteresis to prevent rapid switching
+    if (accelDiffLength > 1.8f || (accelDiffLength > 1.2f && ImuSwitchState != EKF_USE_IMU_MIXED))
+    {
+        if (ImuSwitchState == EKF_USE_IMU_MIXED)
+        {
+            // no previous fail so switch to the IMU with least noise
+            if (imuNoiseFiltState1 < imuNoiseFiltState2)
+            {
+                ImuSwitchState = EKF_USE_IMU1;
+            }
+            else
+            {
+                ImuSwitchState = EKF_USE_IMU2;
+            }
+        }
+        else if (ImuSwitchState == EKF_USE_IMU1)
+        {
+            // IMU1 previously failed so require 5 m/s/s less noise on IMU2 to switch across
+            if (imuNoiseFiltState1 - imuNoiseFiltState2 > 5.0f)
+            {
+                // IMU2 is significantly less noisy, so switch
+                ImuSwitchState = EKF_USE_IMU2;
+            }
+        }
+        else
+        {
+            // IMU2 previously failed so require 5 m/s/s less noise on IMU1 to switch across
+            if (imuNoiseFiltState2 - imuNoiseFiltState1 > 5.0f)
+            {
+                // IMU1 is significantly less noisy, so switch
+                ImuSwitchState = EKF_USE_IMU1;
+            }
+        }
+    }
+    else
+    {
+        ImuSwitchState = EKF_USE_IMU_MIXED;
+    }
 }
 
 // check for new magnetometer data and update store measurements if available
-void ekf_readMagData(void)
+static void ekf_readMagData(void)
 {
     // check to see if magnetometer measurement has changed so we know if a new measurement has arrived
     if (ekf_useCompass() && (compassLastUpdate() != lastMagUpdate_us))
@@ -535,9 +596,10 @@ void ekf_readMagData(void)
         magBias.x = -(compassConfig()->magZero.raw[X] / 1024 * compassConfig()->magGain[X]) * 0.001f;
         magBias.y = -(compassConfig()->magZero.raw[Y] / 1024 * compassConfig()->magGain[Y]) * 0.001f;
         magBias.z = -(compassConfig()->magZero.raw[Z] / 1024 * compassConfig()->magGain[Z]) * 0.001f;
-        magData.x = mag.magADC[X] * 0.001f;
-        magData.y = mag.magADC[Y] * 0.001f;
-        magData.z = mag.magADC[Z] * 0.001f;
+        magData = getMagField();
+        magData.x *= 0.001f;
+        magData.y *= 0.001f;
+        magData.z *= 0.001f;
 
         // get states stored at time closest to measurement time after allowance for measurement delay
         ekf_RecallStates(&statesAtMagMeasTime, imuSampleTime_ms - msecMagDelay);
@@ -552,7 +614,7 @@ void ekf_readMagData(void)
 }
 
 // check for new altitude measurement data and update stored measurement if available
-void ekf_readHgtData(void)
+static void ekf_readHgtData(void)
 {
     // check to see if baro measurement has changed so we know if a new measurement has arrived
     if (ekf_useBarometer() && (posEstimator.baro.lastUpdateTime != lastHgtMeasTime_us))
@@ -578,7 +640,7 @@ void ekf_readHgtData(void)
 }
 
 // check for new valid GPS data and update stored measurement if available
-void ekf_readGpsData(void)
+static void ekf_readGpsData(void)
 {
     if (gpsSol.fixType < GPS_FIX_3D)
     {
@@ -639,7 +701,7 @@ void ekf_readGpsData(void)
 }
 
 // check for new airspeed data and update stored measurements if available
-void ekf_readAirSpdData(void)
+static void ekf_readAirSpdData(void)
 {
     // if airspeed reading is valid and is set by the user to be used and has been updated then we take a new reading
     if (ekf_useAirspeed() && pitot.lastSeenHealthyMs != lastAirspeedUpdate_ms)
@@ -656,7 +718,7 @@ void ekf_readAirSpdData(void)
 }
 
 // resets position states to last GPS measurement or to zero if in vehicleArmed
-void ekf_ResetPosition(void)
+static void ekf_ResetPosition(void)
 {
     if (!vehicleArmed)
     {
@@ -681,7 +743,7 @@ void ekf_ResetPosition(void)
 }
 
 // resets velocity states to last GPS measurement or to zero if in vehicleArmed
-void ekf_ResetVelocity(void)
+static void ekf_ResetVelocity(void)
 {
     if (!vehicleArmed)
     {
@@ -708,7 +770,7 @@ void ekf_ResetVelocity(void)
 }
 
 // reset the vertical position state using the last height measurement
-void ekf_ResetHeight(void)
+static void ekf_ResetHeight(void)
 {
     // read the altimeter
     ekf_readHgtData();
@@ -729,7 +791,7 @@ void ekf_ResetHeight(void)
 }
 
 // store states in a history array along with time stamp
-void ekf_StoreStates(void)
+static void ekf_StoreStates(void)
 {
     // Don't need to store states more often than every 10 msec
     if (imuSampleTime_ms - lastStateStoreTime_ms >= 10)
@@ -746,7 +808,7 @@ void ekf_StoreStates(void)
 }
 
 // reset the stored state history and store the current state
-void ekf_StoreStatesReset(void)
+static void ekf_StoreStatesReset(void)
 {
     // clear stored state history
     memset(&storedStates[0], 0, sizeof(storedStates));
@@ -760,10 +822,10 @@ void ekf_StoreStatesReset(void)
 }
 
 // zero stored variables - this needs to be called before a full filter initialisation
-void ekf_InitialiseVariables(void)
+static void ekf_InitialiseVariables(void)
 {
     // initialise time stamps
-    imuSampleTime_ms = millis();
+    imuSampleTime_ms = US2MS(micros());
     lastHealthyMagTime_ms = imuSampleTime_ms;
     lastDivergeTime_ms = imuSampleTime_ms;
     lastHgtTime_ms = imuSampleTime_ms;
@@ -799,12 +861,8 @@ void ekf_InitialiseVariables(void)
         ekfParam.gpsGlitchAccelMax = FW_GLITCH_ACCEL_DEFAULT;
         ekfParam.gpsGlitchRadiusMax = FW_GLITCH_RADIUS_DEFAULT;
         ekfParam.gpsVelInnovGate = FW_VEL_GATE_DEFAULT;
-        ekfParam.iasNoise = 1.4f;
-        ekfParam.iasInnovGate = 10.0f;
-        ekfParam.windVelProcessNoise = 0.1f;
-        ekfParam.wndVarHgtRateScale = 0.5f;
     }
-    else
+    else if (STATE(MULTIROTOR))
     {
         ekfParam.accBiasUncertainty = MC_INIT_ACCEL_BIAS_UNCERTAINTY;
         ekfParam.accNoise = MC_ACC_PNOISE_DEFAULT;
@@ -824,11 +882,55 @@ void ekf_InitialiseVariables(void)
         ekfParam.gpsGlitchAccelMax = MC_GLITCH_ACCEL_DEFAULT;
         ekfParam.gpsGlitchRadiusMax = MC_GLITCH_RADIUS_DEFAULT;
         ekfParam.gpsVelInnovGate = MC_VEL_GATE_DEFAULT;
-        ekfParam.iasNoise = 1.4f;
-        ekfParam.iasInnovGate = 10.0f;
-        ekfParam.windVelProcessNoise = 0.1f;
-        ekfParam.wndVarHgtRateScale = 0.5f;
     }
+    else if (STATE(ROVER))
+    {
+        ekfParam.accBiasUncertainty = ROVER_INIT_ACCEL_BIAS_UNCERTAINTY;
+        ekfParam.accNoise = ROVER_ACC_PNOISE_DEFAULT;
+        ekfParam.gyroNoise = ROVER_GYRO_PNOISE_DEFAULT;
+        ekfParam.accelBiasProcessNoise = ROVER_ABIAS_PNOISE_DEFAULT;
+        ekfParam.gyroBiasProcessNoise = ROVER_GBIAS_PNOISE_DEFAULT;
+        ekfParam.magNoise = ROVER_MAG_NOISE_DEFAULT;
+        ekfParam.magEarthProcessNoise = ROVER_MAGE_PNOISE_DEFAULT;
+        ekfParam.magBodyProcessNoise = ROVER_MAGB_PNOISE_DEFAULT;
+        ekfParam.magInnovGate = ROVER_MAG_GATE_DEFAULT;
+        ekfParam.hgtInnovGate = ROVER_HGT_GATE_DEFAULT;
+        ekfParam.baroAltNoise = ROVER_ALT_NOISE_DEFAULT;
+        ekfParam.gpsHorizVelNoise = ROVER_VELNE_NOISE_DEFAULT;
+        ekfParam.gpsVertVelNoise = ROVER_VELD_NOISE_DEFAULT;
+        ekfParam.gpsHorizPosNoise = ROVER_POSNE_NOISE_DEFAULT;
+        ekfParam.gpsPosInnovGate = ROVER_POS_GATE_DEFAULT;
+        ekfParam.gpsGlitchAccelMax = ROVER_GLITCH_ACCEL_DEFAULT;
+        ekfParam.gpsGlitchRadiusMax = ROVER_GLITCH_RADIUS_DEFAULT;
+        ekfParam.gpsVelInnovGate = ROVER_VEL_GATE_DEFAULT;
+    }
+    else if (STATE(BOAT))
+    {
+        ekfParam.accBiasUncertainty = BOAT_INIT_ACCEL_BIAS_UNCERTAINTY;
+        ekfParam.accNoise = BOAT_ACC_PNOISE_DEFAULT;
+        ekfParam.gyroNoise = BOAT_GYRO_PNOISE_DEFAULT;
+        ekfParam.accelBiasProcessNoise = BOAT_ABIAS_PNOISE_DEFAULT;
+        ekfParam.gyroBiasProcessNoise = BOAT_GBIAS_PNOISE_DEFAULT;
+        ekfParam.magNoise = BOAT_MAG_NOISE_DEFAULT;
+        ekfParam.magEarthProcessNoise = BOAT_MAGE_PNOISE_DEFAULT;
+        ekfParam.magBodyProcessNoise = BOAT_MAGB_PNOISE_DEFAULT;
+        ekfParam.magInnovGate = BOAT_MAG_GATE_DEFAULT;
+        ekfParam.hgtInnovGate = BOAT_HGT_GATE_DEFAULT;
+        ekfParam.baroAltNoise = BOAT_ALT_NOISE_DEFAULT;
+        ekfParam.gpsHorizVelNoise = BOAT_VELNE_NOISE_DEFAULT;
+        ekfParam.gpsVertVelNoise = BOAT_VELD_NOISE_DEFAULT;
+        ekfParam.gpsHorizPosNoise = BOAT_POSNE_NOISE_DEFAULT;
+        ekfParam.gpsPosInnovGate = BOAT_POS_GATE_DEFAULT;
+        ekfParam.gpsGlitchAccelMax = BOAT_GLITCH_ACCEL_DEFAULT;
+        ekfParam.gpsGlitchRadiusMax = BOAT_GLITCH_RADIUS_DEFAULT;
+        ekfParam.gpsVelInnovGate = BOAT_VEL_GATE_DEFAULT;
+    }
+
+    // common parameters for all platforms
+    ekfParam.iasNoise = 1.4f;
+    ekfParam.iasInnovGate = 10.0f;
+    ekfParam.windVelProcessNoise = 0.1f;
+    ekfParam.wndVarHgtRateScale = 0.5f;
 
     badIMUdata = false;
     velTimeout = false;
@@ -845,6 +947,8 @@ void ekf_InitialiseVariables(void)
     hgtMeas = 0.0f;
     yawRateFilt = 0.0f;
     hgtInnovFiltState = 0.0f;
+
+    ImuSwitchState = EKF_USE_IMU_MIXED;
 
     vectorZero(&lastGyroBias);
     vectorZero(&lastAngRate);
@@ -873,7 +977,7 @@ void ekf_InitialiseVariables(void)
 }
 
 // initialise the covariance matrix
-void ekf_CovarianceInit(void)
+static void ekf_CovarianceInit(void)
 {
     // zero the matrix
     for (uint8_t i = 1; i <= 21; i++)
@@ -927,7 +1031,7 @@ void ekf_CovarianceInit(void)
 // roll/pitch and magnetometer measurements and return initial attitude
 // quaternion if no magnetometer data, do not update amgentic field states and
 // assume zero yaw angle
-fpQuaternion_t ekf_calcQuatAndFieldStates(float roll, float pitch)
+static fpQuaternion_t ekf_calcQuatAndFieldStates(float roll, float pitch)
 {
     // declare local variables required to calculate initial orientation and magnetic field
     float yaw;
@@ -987,22 +1091,22 @@ fpQuaternion_t ekf_calcQuatAndFieldStates(float roll, float pitch)
 }
 
 // this function is used to initialise the EKF filter whilst moving, using the AHRS.
-bool ekf_InitialiseFilterDynamic(void)
+static bool ekf_InitialiseFilterDynamic(void)
 {
-    // If we are a plane and don't have GPS lock then don't initialise
+    // if we are a plane and don't have GPS lock then don't initialise
     if (STATE(FIXED_WING_LEGACY) && gpsSol.fixType < GPS_FIX_3D)
     {
         statesInitialised = false;
         return false;
     }
 
-    // Wait a while for the sensors and DCM AHRS to stabilize
+    // wait a while for the sensors and DCM AHRS to stabilize
     if (millis() - ekfStartTime_ms < 3000U)
     {
         return false;
     }
 
-    // Set re-used variables to zero
+    // set re-used variables to zero
     ekf_InitialiseVariables();
 
     // get initial time deltat between IMU measurements (sec)
@@ -1058,7 +1162,7 @@ bool ekf_InitialiseFilterDynamic(void)
 }
 
 // force symmetry on the covariance matrix to prevent ill-conditioning
-void ekf_ForceSymmetry(void)
+static void ekf_ForceSymmetry(void)
 {
     for (uint8_t i = 1; i <= 21; i++)
     {
@@ -1072,7 +1176,7 @@ void ekf_ForceSymmetry(void)
 }
 
 // constrain variances (diagonal terms) in the state covariance matrix to prevent ill-conditioning
-void ekf_ConstrainVariances(void)
+static void ekf_ConstrainVariances(void)
 {
     for (uint8_t i = 0; i <= 3; i++)
     {
@@ -1108,7 +1212,7 @@ void ekf_ConstrainVariances(void)
 }
 
 // constrain states to prevent ill-conditioning
-void ekf_ConstrainStates(void)
+static void ekf_ConstrainStates(void)
 {
     // quaternions are limited between +-1
     for (uint8_t i = 0; i <= 3; i++)
@@ -1167,7 +1271,7 @@ void ekf_ConstrainStates(void)
 }
 
 // copy covariances across from covariance prediction calculation and fix numerical errors
-void ekf_CopyAndFixCovariances(void)
+static void ekf_CopyAndFixCovariances(void)
 {
     // copy predicted variances
     for (uint8_t i = 0; i <= 21; i++)
@@ -1187,7 +1291,7 @@ void ekf_CopyAndFixCovariances(void)
 }
 
 // fuse magnetometer measurements and apply innovation consistency checks fuse each axis on consecutive time steps to spread computional load
-void ekf_FuseMagnetometer(void)
+static void ekf_FuseMagnetometer(void)
 {
     // declarations
     float *q0 = &mag_state.q0;
@@ -1258,8 +1362,12 @@ void ekf_FuseMagnetometer(void)
         SH_MAG[6] = sq(*q0);
         SH_MAG[7] = 2 * *magN * *q0;
         SH_MAG[8] = 2 * *magE * *q3;
+
         for (uint8_t i = 0; i <= 21; i++)
+        {
             H_MAG[i] = 0;
+        }
+
         H_MAG[0] = SH_MAG[7] + SH_MAG[8] - 2 * *magD * *q2;
         H_MAG[1] = SH_MAG[0];
         H_MAG[2] = 2 * *magE * *q1 - 2 * *magD * *q0 - 2 * *magN * *q2;
@@ -1883,6 +1991,7 @@ void ekf_FuseMagnetometer(void)
                             // P[13][3]*SH_MAG[0] - P[13][1]*SK_MZ[2] +
                             // P[13][2]*SK_MZ[3] + P[13][18]*SK_MZ[1] +
                             // P[13][16]*SK_MZ[5] - P[13][17]*SK_MZ[4]);
+
         // zero Kalman gains to inhibit wind state estimation
         if (!inhibitWindStates)
         {
@@ -1902,6 +2011,7 @@ void ekf_FuseMagnetometer(void)
             Kfusion[14] = 0.0;
             Kfusion[15] = 0.0;
         }
+
         // zero Kalman gains to inhibit magnetic field state estimation
         if (!inhibitMagStates)
         {
@@ -2029,6 +2139,7 @@ void ekf_FuseMagnetometer(void)
                 }
             }
         }
+
         for (uint8_t i = 0; i <= 21; i++)
         {
             for (uint8_t j = 0; j <= 21; j++)
@@ -2047,6 +2158,7 @@ void ekf_FuseMagnetometer(void)
                 }
             }
         }
+
         for (uint8_t i = 0; i <= 21; i++)
         {
             for (uint8_t j = 0; j <= 21; j++)
@@ -2062,7 +2174,7 @@ void ekf_FuseMagnetometer(void)
 }
 
 // fuse true airspeed measurements
-void ekf_FuseAirspeed(void)
+static void ekf_FuseAirspeed(void)
 {
     // declarations
     float vn;
@@ -2095,8 +2207,12 @@ void ekf_FuseAirspeed(void)
         SH_IAS.v[0] = 1.0f / VtasPred;
         SH_IAS.v[1] = (SH_IAS.v[0] * (2 * ve - 2 * vwe)) / 2;
         SH_IAS.v[2] = (SH_IAS.v[0] * (2 * vn - 2 * vwn)) / 2;
+
         for (uint8_t i = 0; i <= 21; i++)
+        {
             H_IAS[i] = 0.0f;
+        }
+
         H_IAS[4] = SH_IAS.v[2];
         H_IAS[5] = SH_IAS.v[1];
         H_IAS[6] = vd * SH_IAS.v[0];
@@ -2311,7 +2427,7 @@ void ekf_FuseAirspeed(void)
 }
 
 // fuse sythetic sideslip measurement of zero
-void ekf_FuseSideslip(void)
+static void ekf_FuseSideslip(void)
 {
     // declarations
     float q0;
@@ -2349,7 +2465,7 @@ void ekf_FuseSideslip(void)
     // rotate into body axes
     vel_rel_wind = multiplyMatrixByVector(prevTnb, vel_rel_wind);
 
-    // perform fusion of assumed sideslip  = 0
+    // perform fusion of assumed sideslip
     if (vel_rel_wind.x > 5.0f)
     {
         // Calculate observation jacobians
@@ -2381,10 +2497,12 @@ void ekf_FuseSideslip(void)
         SH_BETA[10] = 2 * q2 * SH_BETA[2] - 2 * q1 * SH_BETA[3] + 2 * q0 * vd;
         SH_BETA[11] = 2 * q1 * SH_BETA[2] + 2 * q2 * SH_BETA[3] + 2 * q3 * vd;
         SH_BETA[12] = 2 * q0 * q3;
+
         for (uint8_t i = 0; i <= 21; i++)
         {
             H_BETA[i] = 0.0f;
         }
+
         H_BETA[0] =
             SH_BETA[5] * SH_BETA[8] - SH_BETA[1] * SH_BETA[4] * SH_BETA[9];
         H_BETA[1] =
@@ -2832,7 +2950,7 @@ void ekf_FuseSideslip(void)
 }
 
 // calculate the predicted state covariance matrix
-void ekf_CovariancePrediction(void)
+static void ekf_CovariancePrediction(void)
 {
     float windVelSigma;  // wind velocity 1-sigma process noise - m/s
     float dAngBiasSigma; // delta angle bias 1-sigma process noise - rad/s
@@ -2892,7 +3010,9 @@ void ekf_CovariancePrediction(void)
     }
 
     for (uint8_t i = 0; i <= 9; i++)
+    {
         processNoise[i] = 1.0e-9f;
+    }
 
     // scale gyro bias noise when in vehicle disarmed to allow for faster bias estimation
     for (uint8_t i = 10; i <= 12; i++)
@@ -2914,13 +3034,24 @@ void ekf_CovariancePrediction(void)
     processNoise[13] = dVelBiasSigma;
 
     for (uint8_t i = 14; i <= 15; i++)
+    {
         processNoise[i] = windVelSigma;
+    }
+
     for (uint8_t i = 16; i <= 18; i++)
+    {
         processNoise[i] = magEarthSigma;
+    }
+
     for (uint8_t i = 19; i <= 21; i++)
+    {
         processNoise[i] = magBodySigma;
+    }
+
     for (uint8_t i = 0; i <= 21; i++)
+    {
         processNoise[i] = sq(processNoise[i]);
+    }
 
     // set variables used to calculate covariance growth
     dvx = summedDelVel.x;
@@ -4757,7 +4888,7 @@ void ekf_CovariancePrediction(void)
 }
 
 // select fusion of magnetometer data
-void ekf_SelectMagFusion(void)
+static void ekf_SelectMagFusion(void)
 {
     // check for and read new magnetometer measurements
     ekf_readMagData();
@@ -4815,7 +4946,7 @@ void ekf_SelectMagFusion(void)
 // reference without GPS provided the vehicle is not accelerating check
 // innovation consistency of velocity states calculated using IMU1 and IMU2 and
 // calculate the optimal weighting of accel data
-void ekf_FuseVelPosNED(void)
+static void ekf_FuseVelPosNED(void)
 {
     // health is set bad until test passed
     velHealth = false;
@@ -4895,7 +5026,7 @@ void ekf_FuseVelPosNED(void)
         // are outside limits. If so, then it is likely aliasing is affecting
         // the accelerometers and we should disable the GPS and barometer
         // innovation consistency checks.
-        if (fuseVelData && (imuSampleTime_ms - lastHgtTime_ms) < (2 * msecHgtAvg))
+        if (gpsSol.flags.validVelD && fuseVelData && (imuSampleTime_ms - lastHgtTime_ms) < (2 * msecHgtAvg))
         {
             // calculate innovations for height and vertical GPS vel measurements
             float hgtErr = statesAtHgtTime.position.z - observation[5];
@@ -5092,7 +5223,7 @@ void ekf_FuseVelPosNED(void)
 
         // set range for sequential fusion of velocity and position measurements
         // depending on which data is available and its health
-        if (fuseVelData && velHealth && vehicleArmed)
+        if (gpsSol.flags.validVelD && fuseVelData && velHealth && vehicleArmed)
         {
             fuseData[0] = true;
             fuseData[1] = true;
@@ -5132,6 +5263,29 @@ void ekf_FuseVelPosNED(void)
                 else
                 {
                     innovVelPos[obsIndex] = statesAtHgtTime.position.v[obsIndex - 3] - observation[obsIndex];
+
+                    if (obsIndex == 5)
+                    {
+                        static const float gndMaxBaroErr = 4.0f;
+                        static const float gndBaroInnovFloor = -0.5f;
+
+                        // check vertical and horizontal velocities are low (cm/s)
+                        bool velCondition = fabsf(navGetCurrentActualPositionAndVelocity()->vel.z) < (MC_LAND_CHECK_VEL_Z_MOVING) &&
+                                            posControl.actualState.velXY < (MC_LAND_CHECK_VEL_XY_MOVING);
+
+                        if (velCondition)
+                        {
+                            // when a touchdown is expected, floor the barometer innovation at gndBaroInnovFloor
+                            // constrain the correction between 0 and gndBaroInnovFloor + gndMaxBaroErr
+                            // this function looks like this:
+                            //         |/
+                            //---------|---------
+                            //    ____/|
+                            //   /     |
+                            //  /      |
+                            innovVelPos[5] += constrainf(-innovVelPos[5] + gndBaroInnovFloor, 0.0f, gndBaroInnovFloor + gndMaxBaroErr);
+                        }
+                    }
                 }
 
                 // calculate the Kalman gain and calculate innovation variances
@@ -5309,14 +5463,14 @@ void ekf_FuseVelPosNED(void)
 }
 
 // select fusion of velocity, position and height measurements
-void ekf_SelectVelPosFusion(void)
+static void ekf_SelectVelPosFusion(void)
 {
     // check for and read new height data
     ekf_readHgtData();
 
     // If we haven't received height data for a while, then declare the height data as being timed out
     // set timeout period based on whether we have vertical GPS velocity available to constrain drift
-    hgtRetryTime_ms = !velTimeout ? 10000 : 5000;
+    hgtRetryTime_ms = gpsSol.flags.validVelD && !velTimeout ? 10000 : 5000;
     if (imuSampleTime_ms - (timeMs_t)US2MS(lastHgtMeasTime_us) > hgtRetryTime_ms)
     {
         hgtTimeout = true;
@@ -5421,7 +5575,7 @@ void ekf_SelectVelPosFusion(void)
 }
 
 // select fusion of true airspeed measurements
-void ekf_SelectIASFusion(void)
+static void ekf_SelectIASFusion(void)
 {
     // get true airspeed measurement
     ekf_readAirSpdData();
@@ -5450,7 +5604,7 @@ void ekf_SelectIASFusion(void)
 // select fusion of synthetic sideslip measurements
 // synthetic sidelip fusion only works for fixed wing aircraft and relies on the average sideslip being close to zero
 // it requires a stable wind for best results and should not be used for aerobatic flight with manoeuvres that induce large sidslip angles (eg knife-edge, spins, etc)
-void ekf_SelectBetaFusion(void)
+static void ekf_SelectBetaFusion(void)
 {
     // set true when the fusion time interval has triggered
     bool f_timeTrigger = ((imuSampleTime_ms - BETAmsecPrev) >= msecBetaAvg);
@@ -5480,7 +5634,7 @@ void ekf_SelectBetaFusion(void)
 // fly-forward vehicle without an airspeed sensor on the assumption
 // that launch will be into wind and STARTUP_WIND_SPEED is
 // representative of typical launch wind
-void ekf_setWindVelStates(void)
+static void ekf_setWindVelStates(void)
 {
     float gndSpd = calc_length_pythagorean_2D(ekfStates.stateStruct.velocity.x, ekfStates.stateStruct.velocity.y);
     if (gndSpd > 4.0f)
@@ -5498,7 +5652,7 @@ void ekf_setWindVelStates(void)
 }
 
 // update the quaternion, velocity and position states using IMU measurements
-void ekf_UpdateStrapdownEquationsNED(void)
+static void ekf_UpdateStrapdownEquationsNED(void)
 {
     fpVector3_t delVelNav;  // delta velocity vector calculated using a blend of IMU1 and IMU2 data
     fpVector3_t delVelNav1; // delta velocity vector calculated using IMU1 data
@@ -5512,6 +5666,17 @@ void ekf_UpdateStrapdownEquationsNED(void)
     correctedDelVel2 = dVelIMU2;
     correctedDelVel1.z -= ekfStates.stateStruct.accel_zbias1;
     correctedDelVel2.z -= ekfStates.stateStruct.accel_zbias2;
+
+    // use weighted average of both IMU units for delta velocities
+    // Over-ride accelerometer blend weighting using a hard switch based on the IMU consistency and vibration monitoring checks
+    if (ImuSwitchState == EKF_USE_IMU1)
+    {
+        IMU1_weighting = 1.0f;
+    }
+    else if (ImuSwitchState == EKF_USE_IMU2)
+    {
+        IMU1_weighting = 0.0f;
+    }
 
     // use weighted average of both IMU units for delta velocities
     correctedDelVel12.x = correctedDelVel1.x * IMU1_weighting + correctedDelVel2.x * (1.0f - IMU1_weighting);
@@ -5528,7 +5693,7 @@ void ekf_UpdateStrapdownEquationsNED(void)
     quaternionFromAxisAngle(correctedDelAng, &correctedDelAngQuat);
 
     // update the quaternion states by rotating from the previous attitude through the delta angle rotation quaternion and normalise
-    quaternionMultiply(&ekfStates.stateStruct.quat, &ekfStates.stateStruct.quat, &correctedDelAngQuat);
+    quaternion_multiply_assign(&ekfStates.stateStruct.quat, correctedDelAngQuat);
     quaternionNormalize(&ekfStates.stateStruct.quat, &ekfStates.stateStruct.quat);
 
     // calculate the body to nav cosine matrix
@@ -5612,7 +5777,7 @@ void ekf_UpdateStrapdownEquationsNED(void)
 
 // this function is used to do a forced alignment of the yaw angle to align with the horizontal velocity
 // vector from GPS. It is used to align the yaw angle after launch or takeoff.
-void ekf_alignYawGPS(void)
+static void ekf_alignYawGPS(void)
 {
     if ((sq(velNED.v[X]) + sq(velNED.v[Y])) > 16.0f)
     {
@@ -5685,7 +5850,7 @@ void ekf_alignYawGPS(void)
 }
 
 // calculate whether the flight vehicle is on the ground or flying from height, airspeed and GPS speed
-void ekf_OnGroundCheck(void)
+static void ekf_OnGroundCheck(void)
 {
     // determine if the vehicle is manoevring
     if (accNavMagHoriz > 0.5f)
@@ -5791,17 +5956,17 @@ void ekf_UpdateFilter(void)
         return;
     }
 
-    TIME_SECTION_BEGIN(0);
+    timeUs_t ekfPreviousPerfTime_us = micros();
 
     // read IMU data and convert to delta angles and velocities
     ekf_readIMUData();
-    
-    static bool prev_armed = false;
+
     vehicleArmed = ARMING_FLAG(ARMED);
 
     // the vehicle was previously disarmed and time has slipped
     // gyro auto-zero has likely just been done - skip this timestep
-    if (!prev_armed && dtIMU > dtIMUavg * 5.0f) {
+    if (!prev_armed && dtIMU > dtIMUavg * 5.0f)
+    {
         // stop the timer used for load measurement
         prev_armed = vehicleArmed;
         goto end;
@@ -5891,19 +6056,13 @@ void ekf_UpdateFilter(void)
     ekf_SelectBetaFusion();
 
 end:
-    TIME_SECTION_END(0);
+    ekfPerfTime_us = (int16_t)(micros() - ekfPreviousPerfTime_us);
 }
 
 // return the quaternions defining the rotation from NED to XYZ (body) axes
 fpQuaternion_t ekf_getQuaternion(void)
 {
     return ekfStates.stateStruct.quat;
-}
-
-// return the transformation matrix from XYZ (body) to NED axes
-void ekf_getRotationBodyToNED(fpMatrix3_t *mat)
-{
-    quaternionToRotationMatrix(ekfStates.stateStruct.quat, mat);
 }
 
 // return the Euler roll, pitch and yaw angle in radians
@@ -5913,8 +6072,14 @@ void ekf_getEulerAngles(fpVector3_t *euler)
     euler->z = -euler->z;
 }
 
+// return the transformation matrix from XYZ (body) to NED axes
+void ekf_getRotationBodyToNED(fpMatrix3_t *mat)
+{
+    quaternionToRotationMatrix(ekfStates.stateStruct.quat, mat);
+}
+
 // return the individual Z-accel bias estimates in m/s^2
-void ekf_getAccelZBias(float *zbias1, float *zbias2)
+static void ekf_getAccelZBias(float *zbias1, float *zbias2)
 {
     if (dtIMUavg > 0.0f)
     {
@@ -5931,16 +6096,34 @@ void ekf_getAccelZBias(float *zbias1, float *zbias2)
 // blended accelerometer values in the earth frame in m/s/s
 fpVector3_t ekf_getAccelEarthFrameBlended(void)
 {
-    fpVector3_t accel_ef_ekf;
-    fpVector3_t accel = dVelIMU1;
-    float abias1, abias2;
+    fpVector3_t accel_ef_ekf_blended;
+    fpVector3_t accel_ef_ekf[2];
+    fpVector3_t accel[2];
+    float abias[2];
 
-    ekf_getAccelZBias(&abias1, &abias2);
+    ekf_getAccelZBias(&abias[0], &abias[1]);
 
-    accel.z -= abias1;
-    accel_ef_ekf = multiplyMatrixByVector(ahrsMatrix, accel);
+    accel[0] = dVelIMU1;
+    accel[1] = dVelIMU2;
 
-    return accel_ef_ekf;
+    accel[0].z -= abias[0];
+    accel[1].z -= abias[1];
+
+    accel_ef_ekf[0] = multiplyMatrixByVector(ahrsMatrix, accel[0]);
+    accel_ef_ekf[1] = multiplyMatrixByVector(ahrsMatrix, accel[1]);
+
+    if (ImuSwitchState == EKF_USE_IMU_MIXED)
+    {
+        accel_ef_ekf_blended.x = accel_ef_ekf[0].x * IMU1_weighting + accel_ef_ekf[1].x * (1.0f - IMU1_weighting);
+        accel_ef_ekf_blended.y = accel_ef_ekf[0].y * IMU1_weighting + accel_ef_ekf[1].y * (1.0f - IMU1_weighting);
+        accel_ef_ekf_blended.z = accel_ef_ekf[0].z * IMU1_weighting + accel_ef_ekf[1].z * (1.0f - IMU1_weighting);
+    }
+    else
+    {
+        accel_ef_ekf_blended = accel_ef_ekf[0];
+    }
+
+    return accel_ef_ekf_blended;
 }
 
 // return body axis gyro bias estimates in rad/sec
@@ -5980,12 +6163,13 @@ void ekf_getWind(fpVector2_t *wind)
     wind->y = METERS_TO_CENTIMETERS(ekfStates.stateStruct.wind_vel.y);
 }
 
-#include "blackbox/blackbox.h"
-bool bbstart;
-bool bbfinish;
-timeMs_t bbdt;
+// return the total machine cycle consumed in us by the EKF
+int16_t ekf_getDeltaTime(void)
+{
+    return ekfPerfTime_us;
+}
 
-void ekf_Update(float deltaTime)
+void FAST_CODE ekf_Update(float deltaTime)
 {
     if (forceEKFDisable() || !ekfConfig()->ekfEnabled)
     {
@@ -6009,20 +6193,6 @@ void ekf_Update(float deltaTime)
 
         if (ekf_HealthyToUse())
         {
-
-            /*if (!bbstart) {
-                blackboxStart();
-                bbstart = true;
-                bbdt = millis();
-            }
-
-            if (!bbfinish) {
-                if (millis() - bbdt > S2MS(30)) {
-                    blackboxFinish();
-                    bbfinish = true;
-                }
-            }*/
-
             fpVector3_t ekf_eulers;
             fpVector3_t ekf_gyro_bias;
             fpVector2_t ekf_wind_speed;
@@ -6034,50 +6204,20 @@ void ekf_Update(float deltaTime)
             ekf_getVelNEU(&ekfPosVel.vel);
             ekf_getWind(&ekf_wind_speed);
 
-            /*attitude.values.roll = RADIANS_TO_DECIDEGREES(ekf_eulers.x);
+            /*
+            attitude.values.roll = RADIANS_TO_DECIDEGREES(ekf_eulers.x);
             attitude.values.pitch = RADIANS_TO_DECIDEGREES(ekf_eulers.y);
             attitude.values.yaw = RADIANS_TO_DECIDEGREES(ekf_eulers.z);
 
             if (attitude.values.yaw < 0)
             {
                 attitude.values.yaw += 3600;
-            }*/
-
-            int16_t ekf_eulers_z = RADIANS_TO_DECIDEGREES(ekf_eulers.z);
-
-            if (ekf_eulers_z < 0)
-            {
-                ekf_eulers_z += 3600;
             }
 
-            debug[1] = RADIANS_TO_DECIDEGREES(ekf_eulers.x);
-            debug[2] = RADIANS_TO_DECIDEGREES(ekf_eulers.y);
-            debug[3] = ekf_eulers_z / 10;
-
-            float velVar;
-            float posVar;
-            float hgtVar;
-            float magVar;
-            float tasVar;
-
-            ekf_getVariances(&velVar, &posVar, &hgtVar, &magVar, &tasVar);
-
-            // float ekfGroundSpeed = calc_length_pythagorean_2D(ekf_wind_speed.x, ekf_wind_speed.y);
-
-            DEBUG_SET(DEBUG_EKF, 1, velVar * 100.0f);
-            DEBUG_SET(DEBUG_EKF, 2, posVar * 100.0f);
-            DEBUG_SET(DEBUG_EKF, 3, hgtVar * 100.0f);
-            DEBUG_SET(DEBUG_EKF, 4, magVar * 100.0f);
-            DEBUG_SET(DEBUG_EKF, 5, tasVar * 100.0f);
-            DEBUG_SET(DEBUG_EKF, 6, bbfinish);
-
-            /*DEBUG_SET(DEBUG_EKF, 0, ekf_gyro_bias.x);
-            DEBUG_SET(DEBUG_EKF, 1, ekf_gyro_bias.y);
-            DEBUG_SET(DEBUG_EKF, 2, ekf_gyro_bias.z);*/
-
-            // gyro.gyroADCf[X] -= RADIANS_TO_DEGREES(ekf_gyro_bias.x);
-            // gyro.gyroADCf[Y] -= RADIANS_TO_DEGREES(ekf_gyro_bias.y);
-            // gyro.gyroADCf[Z] -= RADIANS_TO_DEGREES(ekf_gyro_bias.z);
+            gyro.gyroADCf[X] -= RADIANS_TO_DEGREES(ekf_gyro_bias.x);
+            gyro.gyroADCf[Y] -= RADIANS_TO_DEGREES(ekf_gyro_bias.y);
+            gyro.gyroADCf[Z] -= RADIANS_TO_DEGREES(ekf_gyro_bias.z);
+            */
         }
     }
 }

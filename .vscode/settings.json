@@ -5,15 +5,11 @@
         "ranges": "c",
         "platform.h": "c",
         "timer.h": "c",
-        "bus.h": "c",
-        "__locale": "c",
-        "regex": "c",
-        "string": "c",
-        "string_view": "c",
-        "ekf.h": "c",
-        "locale": "c",
-        "pitotmeter.h": "c",
-        "compass.h": "c",
-        "navigation.h": "c"
-    }
+        "bus.h": "c"
+    },
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.detectIndentation": false,
+    "editor.expandTabs": true,
+    "C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: Google, IndentWidth: 4,  BreakBeforeBraces: Mozilla }"
 }

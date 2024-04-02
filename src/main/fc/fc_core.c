@@ -885,7 +885,7 @@ static void applyThrottleTiltCompensation(void)
 void taskMainPidLoop(timeUs_t currentTimeUs)
 {
     cycleTime = getTaskDeltaTime(TASK_SELF);
-    dT = (float)cycleTime * 0.000001f;
+    dT = US2S((float)cycleTime);
 
     if (ARMING_FLAG(ARMED) && (!STATE(FIXED_WING_LEGACY) || !isNavLaunchEnabled() || (isNavLaunchEnabled() && fixedWingLaunchStatus() >= FW_LAUNCH_DETECTED))) {
         flightTime += cycleTime;
@@ -897,7 +897,7 @@ void taskMainPidLoop(timeUs_t currentTimeUs)
         armTime = 0;
 
         // Delay saving for 0.5s to allow other functions to process save actions on disarm
-        if (currentTimeUs - lastDisarmTimeUs > USECS_PER_SEC / 2) {
+        if (currentTimeUs - lastDisarmTimeUs > (USECS_PER_SEC / 2)) {
             processDelayedSave();
         }
     }

@@ -377,21 +377,27 @@ static const blackboxDeltaFieldDefinition_t blackboxMainFields[] = {
     {"navAcc",     2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_ACC},
 
 #if defined(USE_EXTENDED_KALMAN_FILTER)
-    {"ekfAttitude",   0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
-    {"ekfAttitude",   1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
-    {"ekfAttitude",   2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
-    {"ekfGyroBias",   0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
-    {"ekfGyroBias",   1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
-    {"ekfGyroBias",   2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
-    {"ekfNavPos",     0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfNavPos",     1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfNavPos",     2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfNavVel",     0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfNavVel",     1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfNavVel",     2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfGroundSpeed", -1, SIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfWind",        0, SIGNED,  .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
-    {"ekfWind",        1, SIGNED,  .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfPerfTimeUs",    -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfAttitude",     0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
+    {"ekfAttitude",     1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
+    {"ekfAttitude",     2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
+    {"ekfGyroBias",     0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
+    {"ekfGyroBias",     1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
+    {"ekfGyroBias",     2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_ATTITUDE},
+    {"ekfNavPos",       0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfNavPos",       1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfNavPos",       2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfNavVel",       0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfNavVel",       1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfNavVel",       2, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(AVERAGE_2),     .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfGroundSpeed", -1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfWind",         0, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfWind",         1, SIGNED,   .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfVelVariation", -1, SIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfPosVariation", -1, SIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfHgtVariation", -1, SIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfMagVariation", -1, SIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(SIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
+    {"ekfTasVariation", -1, SIGNED, .Ipredict = PREDICT(0),       .Iencode = ENCODING(UNSIGNED_VB),   .Ppredict = PREDICT(PREVIOUS),      .Pencode = ENCODING(SIGNED_VB), FLIGHT_LOG_FIELD_CONDITION_NAV_POS},
 #endif
 };
 
@@ -545,12 +551,18 @@ typedef struct blackboxMainState_s {
     uint16_t navTargetHeading;
     int16_t navSurface;
 #if defined(USE_EXTENDED_KALMAN_FILTER)
+    int16_t ekfTimeUs;
     int16_t ekfAttitude[XYZ_AXIS_COUNT];
     int16_t ekfGyroBias[XYZ_AXIS_COUNT];
     int32_t ekfNavPos[XYZ_AXIS_COUNT];
     int16_t ekfNavVel[XYZ_AXIS_COUNT];
     int16_t ekfGroundSpeed;
     int16_t ekfWind[2];
+    int16_t velVar;
+    int16_t posVar;
+    int16_t hgtVar;
+    int16_t magVar;
+    int16_t tasVar;
 #endif
 } blackboxMainState_t;
 
@@ -1016,6 +1028,8 @@ static void writeIntraframe(void)
     }
 
 #if defined(USE_EXTENDED_KALMAN_FILTER)
+    blackboxWriteSignedVB(blackboxCurrent->ekfTimeUs);
+    
     if (testBlackboxCondition(FLIGHT_LOG_FIELD_CONDITION_ATTITUDE)) {
         blackboxWriteSigned16VBArray(blackboxCurrent->ekfAttitude, XYZ_AXIS_COUNT);
         blackboxWriteSigned16VBArray(blackboxCurrent->ekfGyroBias, XYZ_AXIS_COUNT);
@@ -1031,6 +1045,11 @@ static void writeIntraframe(void)
         blackboxWriteSignedVB(blackboxCurrent->ekfGroundSpeed);
         blackboxWriteSignedVB(blackboxCurrent->ekfWind[X]);
         blackboxWriteSignedVB(blackboxCurrent->ekfWind[Y]);
+        blackboxWriteSignedVB(blackboxCurrent->velVar);
+        blackboxWriteSignedVB(blackboxCurrent->posVar);
+        blackboxWriteSignedVB(blackboxCurrent->hgtVar);
+        blackboxWriteSignedVB(blackboxCurrent->magVar);
+        blackboxWriteSignedVB(blackboxCurrent->tasVar);
     }
 #endif
 
@@ -1292,6 +1311,8 @@ static void writeInterframe(void)
     }
 
 #if defined(USE_EXTENDED_KALMAN_FILTER)
+    blackboxWriteSignedVB(blackboxCurrent->ekfTimeUs - blackboxLast->ekfTimeUs);
+
     if (testBlackboxCondition(FLIGHT_LOG_FIELD_CONDITION_ATTITUDE)) {
         blackboxWriteArrayUsingAveragePredictor16(offsetof(blackboxMainState_t, ekfAttitude), XYZ_AXIS_COUNT);
         blackboxWriteArrayUsingAveragePredictor16(offsetof(blackboxMainState_t, ekfGyroBias), XYZ_AXIS_COUNT);
@@ -1307,6 +1328,11 @@ static void writeInterframe(void)
         blackboxWriteSignedVB(blackboxCurrent->ekfGroundSpeed - blackboxLast->ekfGroundSpeed);
         blackboxWriteSignedVB(blackboxCurrent->ekfWind[X] - blackboxLast->ekfWind[X]);
         blackboxWriteSignedVB(blackboxCurrent->ekfWind[Y] - blackboxLast->ekfWind[Y]);
+        blackboxWriteSignedVB(blackboxCurrent->velVar - blackboxLast->velVar);
+        blackboxWriteSignedVB(blackboxCurrent->posVar - blackboxLast->posVar);
+        blackboxWriteSignedVB(blackboxCurrent->hgtVar - blackboxLast->hgtVar);
+        blackboxWriteSignedVB(blackboxCurrent->magVar - blackboxLast->magVar);
+        blackboxWriteSignedVB(blackboxCurrent->tasVar - blackboxLast->tasVar);
     }
 #endif
 
@@ -1758,12 +1784,18 @@ static void loadMainState(timeUs_t currentTimeUs)
     fpVector3_t ekfPos;
     fpVector3_t ekfVel;
     fpVector2_t ekfWind;
+    float velVar;
+    float posVar;
+    float hgtVar;
+    float magVar;
+    float tasVar;
 
     ekf_getEulerAngles(&ekfEulerAngles);
     ekf_getGyroBias(&ekfGyroBias);
     ekf_getPosNEU(&ekfPos);
     ekf_getVelNEU(&ekfVel);
     ekf_getWind(&ekfWind);
+    ekf_getVariances(&velVar, &posVar, &hgtVar, &magVar, &tasVar);
 
     int16_t ekfHeading = RADIANS_TO_DECIDEGREES(ekfEulerAngles.z);
 
@@ -1771,6 +1803,7 @@ static void loadMainState(timeUs_t currentTimeUs)
         ekfHeading += 3600;
     }
     
+    blackboxCurrent->ekfTimeUs = ekf_getDeltaTime();
     blackboxCurrent->ekfAttitude[X] = RADIANS_TO_DECIDEGREES(ekfEulerAngles.x);
     blackboxCurrent->ekfAttitude[Y] = RADIANS_TO_DECIDEGREES(ekfEulerAngles.y);
     blackboxCurrent->ekfAttitude[Z] = ekfHeading;
@@ -1786,6 +1819,11 @@ static void loadMainState(timeUs_t currentTimeUs)
     blackboxCurrent->ekfGroundSpeed = CENTIMETERS_TO_METERS(calc_length_pythagorean_2D(ekfVel.x, ekfVel.y));
     blackboxCurrent->ekfWind[X] = CENTIMETERS_TO_METERS(ekfWind.x);
     blackboxCurrent->ekfWind[Y] = CENTIMETERS_TO_METERS(ekfWind.y);
+    blackboxCurrent->velVar = (int16_t)(velVar * 100.0f);
+    blackboxCurrent->posVar = (int16_t)(posVar * 100.0f);
+    blackboxCurrent->hgtVar = (int16_t)(hgtVar * 100.0f);
+    blackboxCurrent->magVar = (int16_t)(magVar * 100.0f);
+    blackboxCurrent->tasVar = (int16_t)(tasVar * 100.0f);
 #endif
 }
 
