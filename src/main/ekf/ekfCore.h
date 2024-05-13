@@ -1,9 +1,27 @@
 /*
+ * This file is part of INAV.
+ *
+ * INAV is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * INAV is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/*
   24 state EKF based on the derivation in https://github.com/priseborough/
   InertialNav/blob/master/derivations/RotationVectorAttitudeParameterisation/
   GenerateNavFilterEquations.m
 
   Converted from Matlab to C++ by Paul Riseborough
+  Converted from C++ to C by Julio Cesar Matias
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -19,7 +37,6 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #pragma once
-#pragma GCC optimize("O2")
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -40,17 +57,25 @@
 
 #define SOLVE_AFTER
 
-#define EARTH_RATE 0.000072921f // earth rotation rate (rad/sec)
+// earth rotation rate (rad/sec)
+#define EARTH_RATE 0.000072921f
 
-// initial imu bias uncertainty (deg/sec)
+// initial Acc bias uncertainty (deg/sec)
 #define INIT_ACCEL_BIAS_UNCERTAINTY 0.5f
+
+// initial Gyro bias uncertainty (deg/sec)
+#define INIT_GYRO_BIAS_UNCERTAINTY 2.5f
 
 // maximum allowed gyro bias (rad/sec)
 #define GYRO_BIAS_LIMIT 0.5f
 
-// Length of FIFO buffers used for non-IMU sensor data.
-// Must be larger than the time period defined by IMU_BUFFER_LENGTH
+// tilt error after initial alignment using gravity vector (rad)
+#define TILT_ERROR_LIMIT 0.005f
+
+// length of FIFO buffers used for non-IMU sensor data
 #define OBS_BUFFER_LENGTH 5
+
+// length of FIFO buffers used for non-IMU sensor data
 #define FLOW_BUFFER_LENGTH 15
 
 // target EKF update time step
@@ -64,13 +89,6 @@
 
 // number of seconds a request to reset the yaw to the GSF estimate is active before it times out
 #define YAW_RESET_TO_GSF_TIMEOUT_MS 5000
-
-// limit on horizontal position states
-#define EKF_POSXY_STATE_LIMIT 1.0e6
-
-#define COMPASS_MAX_XYZ_ANG_DIFF DEGREES_TO_RADIANS(90.0f)
-#define COMPASS_MAX_XY_ANG_DIFF DEGREES_TO_RADIANS(60.0f)
-#define COMPASS_MAX_XY_LENGTH_DIFF 200.0f
 
 // GPS pre-flight check bit locations
 #define MASK_GPS_NSATS (1 << 0)
@@ -159,7 +177,6 @@ typedef struct
     bool bad_decl : 1;
     bool bad_xflow : 1;
     bool bad_yflow : 1;
-    bool bad_rngbcn : 1;
 } faultStatus_t;
 
 // states held by magnetomter fusion across time steps
@@ -182,6 +199,15 @@ typedef struct
     float R_MAG;
     Vector9 SH_MAG;
 } mag_state_t;
+
+typedef struct
+{
+    fpVector3_t last_raw_gyro;
+    fpVector3_t delta_coning;
+    fpVector3_t delta_angle;
+    fpVector3_t delta_angle_acc;
+    fpVector3_t last_delta_angle;
+} ekfGyroConing_t;
 
 typedef struct
 {
@@ -235,8 +261,7 @@ typedef struct
 
 typedef struct
 {
-    // measurement timestamp (msec)
-    uint32_t time_ms;
+    uint32_t time_ms; // measurement timestamp (msec)
 } EKF_obs_element_t;
 
 typedef struct
@@ -317,20 +342,6 @@ typedef enum
     AID_RELATIVE = 2, // only optical flow aiding is being used so position estimates will be relative
 } AidingMode;
 
-// structure to hold EKF timing statistics
-typedef struct
-{
-    uint32_t count;
-    float dtIMUavg_min;
-    float dtIMUavg_max;
-    float dtEKFavg_min;
-    float dtEKFavg_max;
-    float delAngDT_max;
-    float delAngDT_min;
-    float delVelDT_max;
-    float delVelDT_min;
-} ekf_timing_t;
-
 extern Matrix24 KH;      // intermediate result used for covariance updates
 extern Matrix24 KHP;     // intermediate result used for covariance updates
 extern Matrix24 nextP;   // Predicted covariance matrix before addition of process noise to diagonals
@@ -338,8 +349,8 @@ extern Vector28 Kfusion; // intermediate fusion vector
 extern vertCompFiltState_t vertCompFiltState;
 extern faultStatus_t faultStatus;
 extern mag_state_t mag_state;
-extern ekf_timing_t timing; // timing statistics
-extern ekfStates_U ekfStates;
+extern ekfStates_U ekfStates; // the states are available in two forms, either as a Vector28, or broken down as individual elements. Both are equivalent (same memory)
+extern ekfGyroConing_t ekfGyroConing;
 
 // Variables
 extern bool statesInitialised; // boolean true when filter states have been initialised
@@ -388,7 +399,7 @@ extern float varInnovVtas;                   // innovation variance output from 
 extern bool magFusePerformed;                // boolean set to true when magnetometer fusion has been performed in that time step
 extern uint32_t prevTasStep_ms;              // time stamp of last TAS fusion step
 extern uint32_t prevBetaStep_ms;             // time stamp of last synthetic sideslip fusion step
-extern uint32_t lastMagUpdate_us;            // last time compass was updated in usec
+extern timeUs_t lastMagUpdate_us;            // last time compass was updated in usec
 extern uint32_t lastMagRead_ms;              // last time compass data was successfully read
 extern fpVector3_t velDotNED;                // rate of change of velocity in NED frame
 extern fpVector3_t velDotNEDfilt;            // low pass filtered velDotNED
@@ -406,7 +417,7 @@ extern uint32_t timeAtLastAuxEKF_ms;         // last time the auxiliary filter w
 extern uint32_t lastHealthyMagTime_ms;       // time the magnetometer was last declared healthy
 extern bool magSensorFailed;                 // true if all magnetometer sensors have timed out on this flight and we are no longer using magnetometer data
 extern uint32_t lastYawTime_ms;              // time stamp when yaw observation was last fused (msec)
-extern uint64_t ekfStartTime_us;             // time the EKF was started (usec)
+extern timeMs_t ekfStartTime_ms;             // time the EKF was started (usec)
 extern fpVector2_t lastKnownPositionNE;      // last known position
 extern float velTestRatio;                   // sum of squares of GPS velocity innovation divided by fail threshold
 extern float posTestRatio;                   // sum of squares of GPS position innovation divided by fail threshold
@@ -418,6 +429,8 @@ extern bool inhibitWindStates;               // true when wind states and covari
 extern bool inhibitMagStates;                // true when magnetic field states and covariances are to remain constant
 extern bool lastInhibitMagStates;            // previous inhibitMagStates
 extern bool needMagBodyVarReset;             // we need to reset mag body variances at next CovariancePrediction
+extern gpsLocation_t common_EKF_origin;      // ekf home-point
+extern bool ekf_common_origin_valid;         // ekf home-point valid state
 extern bool gpsNotAvailable;                 // bool true when valid GPS data is not available
 extern gpsLocation_t EKF_origin;             // LLH origin of the NED axis system
 extern bool validOrigin;                     // true when the EKF origin is valid
@@ -459,7 +472,6 @@ extern float innovYaw;                       // compass yaw angle innovation (ra
 extern uint32_t timeTasReceived_ms;          // time last TAS data was received (msec)
 extern bool gpsGoodToAlign;                  // true when the GPS quality can be used to initialise the navigation system
 extern uint32_t magYawResetTimer_ms;         // timer in msec used to track how long good magnetometer data is failing innovation consistency checks
-extern bool consistentMagData;               // true when the magnetometers are passing consistency checks
 extern bool motorsArmed;                     // true when the motors have been armed
 extern bool prevMotorsArmed;                 // value of motorsArmed from previous frame
 extern bool posVelFusionDelayed;             // true when the position and velocity fusion has been delayed
@@ -603,7 +615,7 @@ bool coreInitialiseFilterBootstrap(void);
 
 // Update Filter States - this should be called whenever new IMU data is available
 // The predict flag is set true when a new prediction cycle can be started
-void coreUpdateFilter(bool predict, timeUs_t time_us);
+void coreUpdateFilter(bool predict);
 
 // Check basic filter health metrics and return a consolidated health status
 bool coreHealthy(void);
@@ -639,9 +651,6 @@ void coreGetGyroBias(fpVector3_t *gyroBias);
 
 // return body axis gyro scale factor error as a percentage
 void getGyroScaleErrorPercentage(fpVector3_t *gyroScale);
-
-// reset body axis gyro bias estimates
-void coreResetGyroBias(void);
 
 // return the horizontal speed limit in m/s set by optical flow sensor limits
 // return the scale factor to be applied to navigation velocity gains to compensate for increase in velocity noise with height when using optical flow
@@ -698,8 +707,7 @@ bool getInnovations(fpVector3_t *velInnov, fpVector3_t *posInnov, fpVector3_t *m
 // return the innovation consistency test ratios for the velocity, position, magnetometer and true airspeed measurements
 bool getVariances(float *velVar, float *posVar, float *hgtVar, fpVector3_t *magVar, float *tasVar, fpVector2_t *offset);
 
-// should we use the compass? This is public so it can be used for
-// reporting via ahrs.ekf_useCompass()
+// should we use the compass?
 bool ekf_useCompass(void);
 
 // Set to true if the terrain underneath is stable enough to be used as a height reference
@@ -958,9 +966,6 @@ void recordYawReset(void);
 // record a magnetic field state reset event
 void recordMagReset(void);
 
-// update timing statistics structure
-void updateTimingStatistics(void);
-
 // Runs the IMU prediction step for an independent GSF yaw estimator algorithm
 // that uses IMU, GPS horizontal velocity and optionally true airspeed data.
 void runYawEstimatorPrediction(void);
@@ -1002,17 +1007,14 @@ static inline bool have_aligned_yaw(void)
     return yawAlignComplete;
 }
 
-// should we assume zero sideslip?
-bool assume_zero_sideslip(void);
-
-// vehicle specific initial gyro bias uncertainty
-float InitialGyroBiasUncertainty(void);
-
-fpVector2_t get_distance_NE(gpsLocation_t EKF_origin, gpsLocation_t loc);
-float get_horizontal_distance(gpsLocation_t actualLoc, gpsLocation_t prevLoc);
-void offset_latlng(int32_t *lat, int32_t *lng, float ofs_north, float ofs_east);
-
 static inline float rangeFinderMaxAltitude(void)
 {
     return 700.0f; // in cm
 }
+
+// should we assume zero sideslip?
+bool assume_zero_sideslip(void);
+
+fpVector2_t get_distance_NE(gpsLocation_t EKF_origin, gpsLocation_t loc);
+float get_horizontal_distance(gpsLocation_t actualLoc, gpsLocation_t prevLoc);
+void offset_latlng(int32_t *lat, int32_t *lng, float ofs_north, float ofs_east);

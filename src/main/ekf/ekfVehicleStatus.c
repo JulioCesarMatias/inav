@@ -1,3 +1,19 @@
+/*
+ * This file is part of INAV.
+ *
+ * INAV is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * INAV is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
+ */
 #include "ekf/ekfCore.h"
 #include "ekf/EKFGSF_yaw.h"
 #include "fc/fc_core.h"
@@ -34,7 +50,7 @@ void calcGpsGoodToAlign(void)
 
     // If we have good magnetometer consistency and bad innovations for longer than 5 seconds then we reset heading and field states
     // This enables us to handle large changes to the external magnetic field environment that occur before arming
-    if ((magTestRatio.x <= 1.0f && magTestRatio.y <= 1.0f && yawTestRatio <= 1.0f) || !consistentMagData)
+    if (magTestRatio.x <= 1.0f && magTestRatio.y <= 1.0f && yawTestRatio <= 1.0f)
     {
         magYawResetTimer_ms = imuSampleTime_ms;
     }
@@ -51,16 +67,21 @@ void calcGpsGoodToAlign(void)
     // This check can only be used when the vehicle is stationary
     gpsLocation_t gpsloc = {.lat = gpsSol.llh.lat, .lon = gpsSol.llh.lon, .alt = gpsSol.llh.alt}; // Current location
     const float posFiltTimeConst = 10.0f;                                                         // time constant used to decay position drift
+    
     // calculate time lapsed since last update and limit to prevent numerical errors
     float deltaTime = constrainf((float)(imuDataDelayed.time_ms - lastPreAlignGpsCheckTime_ms) * 0.001f, 0.01f, posFiltTimeConst);
     lastPreAlignGpsCheckTime_ms = imuDataDelayed.time_ms;
+
     // Sum distance moved
     gpsDriftNE += get_horizontal_distance(gpsloc, gpsloc_prev);
     gpsloc_prev = gpsloc;
+
     // Decay distance moved exponentially to zero
     gpsDriftNE *= (1.0f - deltaTime / posFiltTimeConst);
+
     // Clamp the filter state to prevent excessive persistence of large transients
     gpsDriftNE = MIN(gpsDriftNE, 10.0f);
+
     // Fail if more than 3 metres drift after filtering whilst on-ground
     // This corresponds to a maximum acceptable average drift rate of 0.3 m/s or single glitch event of 3m
     bool gpsDriftFail = (gpsDriftNE > 3.0f * checkScaler) && onGround && (ekfParam._gpsCheck & MASK_GPS_POS_DRIFT);
@@ -241,7 +262,7 @@ void calcGpsGoodForFlight(void)
     float alpha2 = constrainf(dtLPF / tau, 0.0f, 1.0f);
 
     // get the receivers reported speed accuracy
-    float gpsSpdAccRaw = gpsSol.speed_accuracy * 0.01f;
+    float gpsSpdAccRaw = CENTIMETERS_TO_METERS(gpsSol.speed_accuracy);
 
     if (!gpsSol.speed_accuracy)
     {

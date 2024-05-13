@@ -1,3 +1,19 @@
+/*
+ * This file is part of INAV.
+ *
+ * INAV is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * INAV is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
+ */
 #include "ekf/ekf.h"
 #include "ekf/ekfCore.h"
 
@@ -23,7 +39,7 @@ void SelectFlowFusion(void)
     // check is the terrain offset estimate is still valid - if we are using range finder as the main height reference, the ground is assumed to be at 0
     gndOffsetValid = ((imuSampleTime_ms - gndHgtValidTime_ms) < 5000) || (activeHgtSource == HGT_SOURCE_RNG);
     // Perform tilt check
-    bool tiltOK = (prevTnb.m[2][2] > ekfParam.DCM33FlowMin);
+    bool tiltOK = (prevTnb.m[2][2] > ekfInternalParam.DCM33FlowMin);
     // Constrain measurements to zero if takeoff is not detected and the height above ground
     // is insufficient to achieve acceptable focus. This allows the vehicle to be picked up
     // and carried to test optical flow operation

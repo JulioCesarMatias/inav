@@ -1,3 +1,19 @@
+/*
+ * This file is part of INAV.
+ *
+ * INAV is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * INAV is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
+ */
 #include "ekf/ekf.h"
 #include "ekf/ekfCore.h"
 #include "ekf/EKFGSF_yaw.h"
@@ -216,7 +232,7 @@ void setAidingMode(void)
 
     case AID_ABSOLUTE:
         // Find the minimum time without data required to trigger any check
-        uint16_t minTestTime_ms = MIN(ekfParam.tiltDriftTimeMax_ms, MIN(ekfParam.posRetryTimeNoVel_ms, ekfParam.posRetryTimeUseVel_ms));
+        uint16_t minTestTime_ms = MIN(ekfInternalParam.tiltDriftTimeMax_ms, MIN(ekfInternalParam.posRetryTimeNoVel_ms, ekfInternalParam.posRetryTimeUseVel_ms));
 
         // Check if optical flow data is being used
         bool optFlowUsed = (imuSampleTime_ms - prevFlowFuseTime_ms <= minTestTime_ms);
@@ -241,10 +257,10 @@ void setAidingMode(void)
         bool attAidLossCritical = false;
         if (!attAiding)
         {
-            attAidLossCritical = (imuSampleTime_ms - prevFlowFuseTime_ms > ekfParam.tiltDriftTimeMax_ms) &&
-                                 (imuSampleTime_ms - lastTasPassTime_ms > ekfParam.tiltDriftTimeMax_ms) &&
-                                 (imuSampleTime_ms - lastPosPassTime_ms > ekfParam.tiltDriftTimeMax_ms) &&
-                                 (imuSampleTime_ms - lastVelPassTime_ms > ekfParam.tiltDriftTimeMax_ms);
+            attAidLossCritical = (imuSampleTime_ms - prevFlowFuseTime_ms > ekfInternalParam.tiltDriftTimeMax_ms) &&
+                                 (imuSampleTime_ms - lastTasPassTime_ms > ekfInternalParam.tiltDriftTimeMax_ms) &&
+                                 (imuSampleTime_ms - lastPosPassTime_ms > ekfInternalParam.tiltDriftTimeMax_ms) &&
+                                 (imuSampleTime_ms - lastVelPassTime_ms > ekfInternalParam.tiltDriftTimeMax_ms);
         }
 
         // Check if the loss of position accuracy has become critical
@@ -254,11 +270,11 @@ void setAidingMode(void)
             uint16_t maxLossTime_ms;
             if (!velAiding)
             {
-                maxLossTime_ms = ekfParam.posRetryTimeNoVel_ms;
+                maxLossTime_ms = ekfInternalParam.posRetryTimeNoVel_ms;
             }
             else
             {
-                maxLossTime_ms = ekfParam.posRetryTimeUseVel_ms;
+                maxLossTime_ms = ekfInternalParam.posRetryTimeUseVel_ms;
             }
             posAidLossCritical = (imuSampleTime_ms - lastPosPassTime_ms > maxLossTime_ms);
         }
@@ -354,7 +370,7 @@ void checkAttitudeAlignmentStatus(void)
 
     if (!tiltAlignComplete)
     {
-        if (tiltErrFilt < 0.005f)
+        if (tiltErrFilt < TILT_ERROR_LIMIT)
         {
             tiltAlignComplete = true;
             sendEKFLogMessage("EKF IMU tilt alignment complete!");
@@ -408,11 +424,7 @@ bool ekf_useCompass(void)
 // should we assume zero sideslip?
 bool assume_zero_sideslip(void)
 {
-    // we don't assume zero sideslip for ground vehicles as EKF could
-    // be quite sensitive to a rapid spin of the ground vehicle if
-    // traction is lost
-    bool groundVehicle = STATE(ROVER) || STATE(BOAT);
-    return STATE(FIXED_WING_LEGACY) && !groundVehicle;
+    return STATE(FIXED_WING_LEGACY);
 }
 
 // sets the local NED origin using a LLH location (latitude, longitude, height)
@@ -446,8 +458,8 @@ bool setOrigin(gpsLocation_t *loc)
     sendEKFLogMessage("EKF IMU origin set");
 
     // put origin in frontend as well to ensure it stays in sync between lanes
-    ekfParam.common_EKF_origin = EKF_origin;
-    ekfParam.common_origin_valid = true;
+    common_EKF_origin = EKF_origin;
+    ekf_common_origin_valid = true;
 
     return true;
 }
@@ -456,12 +468,13 @@ bool setOrigin(gpsLocation_t *loc)
 void recordYawReset(void)
 {
     yawAlignComplete = true;
+    
     if (inFlight)
     {
         finalInflightYawInit = true;
     }
 }
-
+#include "build/debug.h"
 // return true and set the class variable true if the delta angle bias has been learned
 bool checkGyroCalStatus(void)
 {
@@ -476,6 +489,10 @@ bool checkGyroCalStatus(void)
         fpVector3_t temp = multiplyMatrixByVector(prevTnb, delAngBiasVarVec);
         delAngBiasLearned = (fabsf(temp.x) < delAngBiasVarMax) &&
                             (fabsf(temp.y) < delAngBiasVarMax);
+
+        debug[4] = delAngBiasVarMax * 1e10;
+        debug[5] = temp.x * 1e10;
+        debug[6] = temp.y * 1e10;
     }
     else
     {

@@ -1,9 +1,27 @@
-#include "ekf/ekf.h"
+/*
+ * This file is part of INAV.
+ *
+ * INAV is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * INAV is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 #include "ekf/ekfCore.h"
 #include "ekf/ekfBuffer.h"
 #include "common/log.h"
 #include "common/utils.h"
 #include "drivers/time.h"
+
+// Ported from ArduPilot to INAV by Julio Cesar Matias
 
 // Variables
 bool statesInitialised; // boolean true when filter states have been initialised
@@ -21,14 +39,14 @@ Matrix24 nextP;   // Predicted covariance matrix before addition of process nois
 Vector28 Kfusion; // intermediate fusion vector
 Matrix24 P;       // covariance matrix
 
-uint8_t imu_buffer_length;
-ekf_imu_buffer storedIMU;    // IMU data buffer
-ekf_ring_buffer storedGPS;   // GPS data buffer
-ekf_ring_buffer storedMag;   // Magnetometer data buffer
-ekf_ring_buffer storedBaro;  // Baro data buffer
-ekf_ring_buffer storedTAS;   // TAS data buffer
-ekf_ring_buffer storedRange; // Range finder data buffer
-ekf_imu_buffer storedOutput; // output state buffer
+uint8_t imu_buffer_length;            // Sizeof stored IMU buffer
+ekf_imu_buffer storedIMU;             // IMU data buffer
+ekf_ring_buffer storedGPS;            // GPS data buffer
+ekf_ring_buffer storedMag;            // Magnetometer data buffer
+ekf_ring_buffer storedBaro;           // Baro data buffer
+ekf_ring_buffer storedTAS;            // TAS data buffer
+ekf_ring_buffer storedRange;          // Range finder data buffer
+ekf_imu_buffer storedOutput;          // output state buffer
 fpMat3_t prevTnb;                     // previous nav to body transformation used for INS earth rotation compensation
 float accNavMag;                      // magnitude of navigation accel - used to adjust GPS obs variance (m/s^2)
 float accNavMagHoriz;                 // magnitude of navigation accel in horizontal plane (m/s^2)
@@ -57,7 +75,7 @@ float varInnovVtas;                   // innovation variance output from fusion 
 bool magFusePerformed;                // boolean set to true when magnetometer fusion has been performed in that time step
 uint32_t prevTasStep_ms;              // time stamp of last TAS fusion step
 uint32_t prevBetaStep_ms;             // time stamp of last synthetic sideslip fusion step
-uint32_t lastMagUpdate_us;            // last time compass was updated in usec
+timeUs_t lastMagUpdate_us;            // last time compass was updated in usec
 uint32_t lastMagRead_ms;              // last time compass data was successfully read
 fpVector3_t velDotNED;                // rate of change of velocity in NED frame
 fpVector3_t velDotNEDfilt;            // low pass filtered velDotNED
@@ -75,7 +93,7 @@ uint32_t timeAtLastAuxEKF_ms;         // last time the auxiliary filter was run 
 uint32_t lastHealthyMagTime_ms;       // time the magnetometer was last declared healthy
 bool magSensorFailed;                 // true if all magnetometer sensors have timed out on this flight and we are no longer using magnetometer data
 uint32_t lastYawTime_ms;              // time stamp when yaw observation was last fused (msec)
-uint64_t ekfStartTime_us;             // time the EKF was started (usec)
+timeMs_t ekfStartTime_ms;             // time the EKF was started (usec)
 fpVector2_t lastKnownPositionNE;      // last known position
 float velTestRatio;                   // sum of squares of GPS velocity innovation divided by fail threshold
 float posTestRatio;                   // sum of squares of GPS position innovation divided by fail threshold
@@ -87,6 +105,8 @@ bool inhibitWindStates;               // true when wind states and covariances a
 bool inhibitMagStates;                // true when magnetic field states and covariances are to remain constant
 bool lastInhibitMagStates;            // previous inhibitMagStates
 bool needMagBodyVarReset;             // we need to reset mag body variances at next CovariancePrediction
+gpsLocation_t common_EKF_origin;      // ekf home-point
+bool ekf_common_origin_valid;         // ekf home-point valid state
 bool gpsNotAvailable;                 // bool true when valid GPS data is not available
 gpsLocation_t EKF_origin;             // LLH origin of the NED axis system
 bool validOrigin;                     // true when the EKF origin is valid
@@ -128,7 +148,6 @@ float innovYaw;                       // compass yaw angle innovation (rad)
 uint32_t timeTasReceived_ms;          // time last TAS data was received (msec)
 bool gpsGoodToAlign;                  // true when the GPS quality can be used to initialise the navigation system
 uint32_t magYawResetTimer_ms;         // timer in msec used to track how long good magnetometer data is failing innovation consistency checks
-bool consistentMagData;               // true when the magnetometers are passing consistency checks
 bool motorsArmed;                     // true when the motors have been armed
 bool prevMotorsArmed;                 // value of motorsArmed from previous frame
 bool posVelFusionDelayed;             // true when the position and velocity fusion has been delayed
@@ -253,14 +272,12 @@ uint8_t magYawAnomallyCount;       // Number of times the yaw has been reset due
 vertCompFiltState_t vertCompFiltState;
 faultStatus_t faultStatus;
 mag_state_t mag_state;
+ekfGyroConing_t ekfGyroConing;
 
 // earth field from WMM tables
 bool have_table_earth_field;      // true when we have initialised table_earth_field_ga
 fpVector3_t table_earth_field_ga; // earth field from WMM tables
 float table_declination;          // declination in radians from the tables
-
-// timing statistics
-ekf_timing_t timing;
 
 char last_ekf_msg[50];
 bool ekf_msg_sended[2];
@@ -272,7 +289,7 @@ uint32_t EKFGSF_yaw_reset_request_ms; // timestamp of last emergency yaw reset r
 uint8_t EKFGSF_yaw_reset_count;       // number of emergency yaw resets performed
 bool EKFGSF_run_filterbank;           // true when the filter bank is active
 
-ekfStates_U ekfStates;
+ekfStates_U ekfStates; // the states are available in two forms, either as a Vector28, or broken down as individual elements. Both are equivalent (same memory)
 
 bool setupEKFRingBuffer(void)
 {
@@ -287,7 +304,7 @@ bool setupEKFRingBuffer(void)
       Non-imu data coming in at faster than 100Hz is downsampled.
       For 50Hz main loop rate we need a shorter buffer.
      */
-    if (ekfParam._imuTimeHz < 100)
+    if (ekfInternalParam.imuTimeHz < 100)
     {
         imu_buffer_length = 13;
     }
@@ -336,7 +353,7 @@ bool setupEKFRingBuffer(void)
     {
         return false;
     }
-    
+
     sendEKFLogMessage("");
     sendEKFLogMessage("EKF enabled");
 
@@ -347,7 +364,7 @@ bool setupEKFRingBuffer(void)
 void InitialiseVariables(void)
 {
     // calculate the nominal filter update rate
-    localFilterTimeStep_ms = (uint8_t)(1000.0f * (1.0f / (float)ekfParam._imuTimeHz));
+    localFilterTimeStep_ms = (uint8_t)(1000.0f * (1.0f / (float)ekfInternalParam.imuTimeHz));
     localFilterTimeStep_ms = MAX(localFilterTimeStep_ms, 10);
 
     // initialise time stamps
@@ -367,7 +384,7 @@ void InitialiseVariables(void)
     flowMeaTime_ms = 0;
     prevFlowFuseTime_ms = 0;
     gndHgtValidTime_ms = 0;
-    ekfStartTime_us = MS2US(imuSampleTime_ms);
+    ekfStartTime_ms = imuSampleTime_ms;
     lastGpsVelFail_ms = 0;
     lastGpsVelPass_ms = 0;
     lastGpsAidBadTime_ms = 0;
@@ -383,7 +400,7 @@ void InitialiseVariables(void)
     hgtTimeout = true;
     tasTimeout = true;
     badIMUdata = false;
-    dtIMUavg = 0.0025f;
+    dtIMUavg = 1.0f / (float)ekfInternalParam.imuTimeHz;
     dtEkfAvg = EKF_TARGET_DT;
     dt = 0.0f;
     vectorZero(&velDotNEDfilt);
@@ -401,8 +418,8 @@ void InitialiseVariables(void)
     prevPosN = ekfStates.stateStruct.position.x;
     prevPosE = ekfStates.stateStruct.position.y;
     inhibitGndState = false;
-    flowGyroBias.x = 0;
-    flowGyroBias.y = 0;
+    flowGyroBias.x = 0.0f;
+    flowGyroBias.y = 0.0f;
     PV_AidingMode = AID_NONE;
     PV_AidingModePrev = AID_NONE;
     posTimeout = true;
@@ -536,7 +553,7 @@ bool coreInitialiseFilterBootstrap(void)
     // If we are a plane and don't have GPS lock then don't initialise
     if (assume_zero_sideslip() && gpsSol.fixType < GPS_FIX_3D)
     {
-        sendEKFLogMessage("EKF init failure: No GPS lock");
+        sendEKFLogMessage("EKF airplane mode init failure: No GPS lock");
         statesInitialised = false;
         return false;
     }
@@ -551,13 +568,13 @@ bool coreInitialiseFilterBootstrap(void)
         readGpsData();
         readBaroData();
 
-        bool imu_buffer_is_filled = ekf_imu_buffer_is_filled(&storedIMU);
+        const bool imu_buffer_is_filled = ekf_imu_buffer_is_filled(&storedIMU);
 
-        if (imu_buffer_is_filled) 
+        if (imu_buffer_is_filled)
         {
             sendEKFLogMessage("EKF IMU Buffer has been filled");
-        } 
-        else 
+        }
+        else
         {
             sendEKFLogMessage("EKF IMU Buffer not filled");
         }
@@ -569,7 +586,6 @@ bool coreInitialiseFilterBootstrap(void)
     InitialiseVariables();
 
     // Initialise IMU data
-    dtIMUavg = 1.0f / (float)ekfParam._imuTimeHz;
     readIMUData();
     ekf_imu_buffer_reset_history(&storedIMU, &imuDataNew);
     imuDataDelayed = imuDataNew;
@@ -578,17 +594,18 @@ bool coreInitialiseFilterBootstrap(void)
     readMagData();
 
     // acceleration vector in XYZ body axes measured by the IMU
+    float dVel_dt;
+    float pitch;
+    float roll;
     fpVector3_t initAccVec;
-    accGetMeasuredAcceleration(&initAccVec);
+    readDeltaVelocity(&initAccVec, &dVel_dt);
 
     // convert the accel in body frame in cm/s to m/s
-    initAccVec.x *= 0.01f;
-    initAccVec.y *= 0.01f;
-    initAccVec.z *= 0.01f;
+    initAccVec.x = CENTIMETERS_TO_METERS(initAccVec.x) / dVel_dt;
+    initAccVec.y = CENTIMETERS_TO_METERS(initAccVec.y) / dVel_dt;
+    initAccVec.z = CENTIMETERS_TO_METERS(initAccVec.z) / dVel_dt;
 
     // normalise the acceleration vector
-    float pitch = 0.0f;
-    float roll = 0.0f;
     if (calc_length_pythagorean_3D(initAccVec.x, initAccVec.y, initAccVec.z) > 0.001f)
     {
         vectorNormalize(&initAccVec, &initAccVec);
@@ -597,7 +614,7 @@ bool coreInitialiseFilterBootstrap(void)
         roll = atan2f(initAccVec.x, initAccVec.z);
 
         // calculate initial pitch angle
-        pitch = asinf(initAccVec.y);
+        pitch = asinf(-initAccVec.y);
     }
 
     // calculate initial roll and pitch orientation
@@ -629,7 +646,7 @@ bool coreInitialiseFilterBootstrap(void)
     ResetHeight();
 
     // define Earth rotation vector in the NED navigation frame
-    calcEarthRateNED(&earthRateNED, posControl.gpsOrigin.lat);
+    // calcEarthRateNED(&earthRateNED, posControl.gpsOrigin.lat);
 
     // initialise the covariance matrix
     CovarianceInit();
@@ -666,12 +683,12 @@ void CovarianceInit(void)
     P[8][8] = sq(ekfParam._baroAltNoise);
 
     // gyro delta angle biases
-    P[9][9] = sq(DEGREES_TO_RADIANS(InitialGyroBiasUncertainty() * dtEkfAvg));
+    P[9][9] = sq(DEGREES_TO_RADIANS(INIT_GYRO_BIAS_UNCERTAINTY * dtEkfAvg));
     P[10][10] = P[9][9];
     P[11][11] = P[9][9];
 
     // gyro scale factor biases
-    P[12][12] = sq(1e-3);
+    P[12][12] = sq(1e-3f);
     P[13][13] = P[12][12];
     P[14][14] = P[12][12];
 
@@ -697,7 +714,7 @@ void CovarianceInit(void)
 }
 
 // Update Filter States - this should be called whenever new IMU data is available
-void FAST_CODE coreUpdateFilter(bool predict, timeUs_t time_us)
+void FAST_CODE coreUpdateFilter(bool predict)
 {
     // Set the flag to indicate to the filter that the front-end has given permission for a new state prediction cycle to be started
     startPredictEnabled = predict;
@@ -709,7 +726,7 @@ void FAST_CODE coreUpdateFilter(bool predict, timeUs_t time_us)
     }
 
     // get starting time for update step
-    imuSampleTime_ms = US2MS(time_us);
+    imuSampleTime_ms = millis();
 
     // Check arm status and perform required checks and mode changes
     controlFilterModes();
@@ -767,10 +784,10 @@ void FAST_CODE coreUpdateFilter(bool predict, timeUs_t time_us)
      */
     if (filterStatus.value != 0)
     {
-        last_filter_ok_ms = US2MS(time_us);
+        last_filter_ok_ms = millis();
     }
 
-    if (filterStatus.value == 0 && last_filter_ok_ms != 0 && US2MS(time_us) - last_filter_ok_ms > 5000 && !get_armed())
+    if (filterStatus.value == 0 && last_filter_ok_ms != 0 && millis() - last_filter_ok_ms > 5000 && !get_armed())
     {
         // we've been unhealthy for 5 seconds after being healthy, reset the filter
         sendEKFLogMessage("EKF IMU forced reset");
@@ -778,21 +795,6 @@ void FAST_CODE coreUpdateFilter(bool predict, timeUs_t time_us)
         statesInitialised = false;
         coreInitialiseFilterBootstrap();
     }
-}
-
-void correctDeltaAngle(fpVector3_t *delAng, float delAngDT)
-{
-    delAng->x *= ekfStates.stateStruct.gyro_scale.x;
-    delAng->y *= ekfStates.stateStruct.gyro_scale.y;
-    delAng->z *= ekfStates.stateStruct.gyro_scale.z;
-    delAng->x -= ekfStates.stateStruct.gyro_bias.x * (delAngDT / dtEkfAvg);
-    delAng->y -= ekfStates.stateStruct.gyro_bias.y * (delAngDT / dtEkfAvg);
-    delAng->z -= ekfStates.stateStruct.gyro_bias.z * (delAngDT / dtEkfAvg);
-}
-
-void correctDeltaVelocity(fpVector3_t *delVel, float delVelDT)
-{
-    delVel->z -= ekfStates.stateStruct.accel_zbias * (delVelDT / dtEkfAvg);
 }
 
 /*
@@ -805,9 +807,7 @@ void correctDeltaVelocity(fpVector3_t *delVel, float delVelDT)
 void UpdateStrapdownEquationsNED(void)
 {
     // update the quaternion states by rotating from the previous attitude through
-    // the delta angle rotation quaternion and normalise
-    // apply correction for earth's rotation rate
-    // % * - and + operators have been overloaded
+    // the delta angle rotation quaternion and normalise apply correction for earth's rotation rate
     fpVector3_t mulResult = multiplyMatrixByVector(prevTnb, earthRateNED);
     mulResult.x *= imuDataDelayed.delAngDT;
     mulResult.y *= imuDataDelayed.delAngDT;
@@ -817,11 +817,8 @@ void UpdateStrapdownEquationsNED(void)
     quaternion_normalize(&ekfStates.stateStruct.quat);
 
     // transform body delta velocities to delta velocities in the nav frame
-    // use the nav frame from previous time step as the delta velocities
-    // have been rotated into that frame
-    // * and + operators have been overloaded
-    fpVector3_t delVelNav; // delta velocity vector in earth axes
-    delVelNav = multiplyMatrixTransposeByVector(prevTnb, delVelCorrected);
+    // use the nav frame from previous time step as the delta velocities have been rotated into that frame
+    fpVector3_t delVelNav = multiplyMatrixTransposeByVector(prevTnb, delVelCorrected); // delta velocity vector in earth axes
     delVelNav.z += GRAVITY_MSS * imuDataDelayed.delVelDT;
 
     // calculate the nav to body cosine matrix
@@ -873,6 +870,21 @@ void UpdateStrapdownEquationsNED(void)
     ConstrainStates();
 }
 
+void correctDeltaAngle(fpVector3_t *delAng, float delAngDT)
+{
+    delAng->x *= ekfStates.stateStruct.gyro_scale.x;
+    delAng->y *= ekfStates.stateStruct.gyro_scale.y;
+    delAng->z *= ekfStates.stateStruct.gyro_scale.z;
+    delAng->x -= ekfStates.stateStruct.gyro_bias.x * (delAngDT / dtEkfAvg);
+    delAng->y -= ekfStates.stateStruct.gyro_bias.y * (delAngDT / dtEkfAvg);
+    delAng->z -= ekfStates.stateStruct.gyro_bias.z * (delAngDT / dtEkfAvg);
+}
+
+void correctDeltaVelocity(fpVector3_t *delVel, float delVelDT)
+{
+    delVel->z -= ekfStates.stateStruct.accel_zbias * (delVelDT / dtEkfAvg);
+}
+
 /*
  * Propagate PVA solution forward from the fusion time horizon to the current time horizon
  * using simple observer which performs two functions:
@@ -897,7 +909,7 @@ void calcOutputStates(void)
     fpVector3_t delAng = {.v = {delAngNewCorrected.x + delAngCorrection.x,
                                 delAngNewCorrected.y + delAngCorrection.y,
                                 delAngNewCorrected.z + delAngCorrection.z}};
-
+                                
     // convert the rotation vector to its equivalent quaternion
     fpQuaternion_t deltaQuat;
     quaternion_from_axis_angle(&deltaQuat, delAng);
@@ -945,7 +957,7 @@ void calcOutputStates(void)
     outputDataNew.position.x += (outputDataNew.velocity.x + lastVelocity.x) * (imuDataNew.delVelDT * 0.5f);
     outputDataNew.position.y += (outputDataNew.velocity.y + lastVelocity.y) * (imuDataNew.delVelDT * 0.5f);
     outputDataNew.position.z += (outputDataNew.velocity.z + lastVelocity.z) * (imuDataNew.delVelDT * 0.5f);
-    
+
     // store INS states in a ring buffer that with the same length and time coordinates as the IMU data buffer
     if (runUpdates)
     {
@@ -961,18 +973,9 @@ void calcOutputStates(void)
         // Convert to a delta rotation using a small angle approximation
         quaternion_normalize(&quatErr);
 
-        float scaler;
+        const float scaler = (quatErr.q0 >= 0.0f) ? 2.0f : -2.0f;
 
-        if (quatErr.q0 >= 0.0f)
-        {
-            scaler = 2.0f;
-        }
-        else
-        {
-            scaler = -2.0f;
-        }
-
-        fpVector3_t deltaAngErr = {.v = {scaler * quatErr.q1, scaler * quatErr.q2, scaler * quatErr.q3}};
+        const fpVector3_t deltaAngErr = {.v = {scaler * quatErr.q1, scaler * quatErr.q2, scaler * quatErr.q3}};
 
         // calculate a gain that provides tight tracking of the estimator states and
         // adjust for changes in time delay to maintain consistent damping ratio of ~0.7
@@ -1087,16 +1090,13 @@ void CovariancePrediction(void)
     Vector8 SQ;
     Vector24 processNoise;
 
-    // calculate covariance prediction process noise
-    // use filtered height rate to increase wind process noise when climbing or descending
-    // this allows for wind gradient effects.
-    // filter height rate using a 10 second time constant filter
     dt = imuDataDelayed.delAngDT;
+
+    // Use filtered height rate to increase wind process noise when climbing or descending this allows for wind gradient effects.
+    // Filter height rate using a 10 second time constant filter
     float alpha = 0.1f * dt;
     hgtRate = hgtRate * (1.0f - alpha) - ekfStates.stateStruct.velocity.z * alpha;
 
-    // use filtered height rate to increase wind process noise when climbing or descending
-    // this allows for wind gradient effects.
     windVelSigma = dt * constrainf(ekfParam._windVelProcessNoise, 0.0f, 1.0f) * (1.0f + constrainf(ekfParam._wndVarHgtRateScale, 0.0f, 1.0f) * fabsf(hgtRate));
     dAngBiasSigma = sq(dt) * constrainf(ekfParam._gyroBiasProcessNoise, 0.0f, 1.0f);
     dVelBiasSigma = sq(dt) * constrainf(ekfParam._accelBiasProcessNoise, 0.0f, 1.0f);
@@ -1105,13 +1105,19 @@ void CovariancePrediction(void)
     magBodySigma = dt * constrainf(ekfParam._magBodyProcessNoise, 0.0f, 1.0f);
 
     for (uint8_t i = 0; i <= 8; i++)
+    {
         processNoise[i] = 0.0f;
+    }
 
     for (uint8_t i = 9; i <= 11; i++)
+    {
         processNoise[i] = dAngBiasSigma;
+    }
 
     for (uint8_t i = 12; i <= 14; i++)
+    {
         processNoise[i] = dAngScaleSigma;
+    }
 
     if (get_takeoff_expected())
     {
@@ -1123,16 +1129,24 @@ void CovariancePrediction(void)
     }
 
     for (uint8_t i = 16; i <= 18; i++)
+    {
         processNoise[i] = magEarthSigma;
+    }
 
     for (uint8_t i = 19; i <= 21; i++)
+    {
         processNoise[i] = magBodySigma;
+    }
 
     for (uint8_t i = 22; i <= 23; i++)
+    {
         processNoise[i] = windVelSigma;
+    }
 
     for (uint8_t i = 0; i <= stateIndexLim; i++)
+    {
         processNoise[i] = sq(processNoise[i]);
+    }
 
     // set variables used to calculate covariance growth
     dvx = imuDataDelayed.delVel.x;
@@ -1581,8 +1595,7 @@ void CovariancePrediction(void)
 
     // if the total position variance exceeds 1e4 (100m), then stop covariance
     // growth by setting the predicted to the previous values
-    // This prevent an ill conditioned matrix from occurring for long periods
-    // without GPS
+    // This prevent an ill conditioned matrix from occurring for long periods without GPS
     if ((P[6][6] + P[7][7]) > 1e4f)
     {
         for (uint8_t i = 6; i <= 7; i++)
@@ -1602,7 +1615,7 @@ void CovariancePrediction(void)
     ConstrainVariances();
 }
 
-// zero part of an array for index range [n1,n2]
+// zero part of an array for index range [n1, n2]
 static void zero_range(float *v, uint8_t n1, uint8_t n2)
 {
     memset(&v[n1], 0, sizeof(float) * (1 + (n2 - n1)));
@@ -1634,12 +1647,15 @@ void StoreOutputReset(void)
     outputDataNew.quat = ekfStates.stateStruct.quat;
     outputDataNew.velocity = ekfStates.stateStruct.velocity;
     outputDataNew.position = ekfStates.stateStruct.position;
+
     // write current measurement to entire table
     for (uint8_t i = 0; i < imu_buffer_length; i++)
     {
         memcpy(ekf_output_buffer_get(&storedOutput, i), &outputDataNew, sizeof(output_elements_t));
     }
+
     outputDataDelayed = outputDataNew;
+
     // reset the states for the complementary filter used to provide a vertical position dervative output
     vertCompFiltState.pos = ekfStates.stateStruct.position.z;
     vertCompFiltState.vel = ekfStates.stateStruct.velocity.z;
@@ -1690,23 +1706,33 @@ void CopyCovariances(void)
 void ConstrainVariances(void)
 {
     for (uint8_t i = 0; i <= 2; i++)
+    {
         P[i][i] = constrainf(P[i][i], 0.0f, 1.0f); // attitude error
+    }
 
     for (uint8_t i = 3; i <= 5; i++)
+    {
         P[i][i] = constrainf(P[i][i], 0.0f, 1.0e3f); // velocities
+    }
 
     for (uint8_t i = 6; i <= 7; i++)
-        P[i][i] = constrainf(P[i][i], 0.0f, EKF_POSXY_STATE_LIMIT);
+    {
+        P[i][i] = constrainf(P[i][i], 0.0f, 1.0e6f);
+    }
 
     P[8][8] = constrainf(P[8][8], 0.0f, 1.0e6f); // vertical position
 
     for (uint8_t i = 9; i <= 11; i++)
+    {
         P[i][i] = constrainf(P[i][i], 0.0f, sq(0.175f * dtEkfAvg)); // delta angle biases
+    }
 
     if (PV_AidingMode != AID_NONE)
     {
         for (uint8_t i = 12; i <= 14; i++)
+        {
             P[i][i] = constrainf(P[i][i], 0.0f, 0.01f); // delta angle scale factors
+        }
     }
     else
     {
@@ -1719,13 +1745,19 @@ void ConstrainVariances(void)
     P[15][15] = constrainf(P[15][15], 0.0f, sq(10.0f * dtEkfAvg)); // delta velocity bias
 
     for (uint8_t i = 16; i <= 18; i++)
+    {
         P[i][i] = constrainf(P[i][i], 0.0f, 0.01f); // earth magnetic field
+    }
 
     for (uint8_t i = 19; i <= 21; i++)
+    {
         P[i][i] = constrainf(P[i][i], 0.0f, 0.01f); // body magnetic field
+    }
 
     for (uint8_t i = 22; i <= 23; i++)
+    {
         P[i][i] = constrainf(P[i][i], 0.0f, 1.0e3f); // wind velocity
+    }
 }
 
 // constrain states using WMM tables and specified limit
@@ -1752,26 +1784,36 @@ void ConstrainStates(void)
 {
     // attitude errors are limited between +-1
     for (uint8_t i = 0; i <= 2; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -1.0f, 1.0f);
+    }
 
     // velocity limit 500 m/sec (could set this based on some multiple of max airspeed * EAS2TAS)
     for (uint8_t i = 3; i <= 5; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -5.0e2f, 5.0e2f);
+    }
 
     // position limit - TODO apply circular limit
     for (uint8_t i = 6; i <= 7; i++)
-        ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -EKF_POSXY_STATE_LIMIT, EKF_POSXY_STATE_LIMIT);
+    {
+        ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -1.0e6f, 1.0e6f);
+    }
 
     // height limit covers home alt on everest through to home alt at SL and ballon drop
     ekfStates.stateStruct.position.z = constrainf(ekfStates.stateStruct.position.z, -4.0e4f, 1.0e4f);
 
     // gyro bias limit (this needs to be set based on manufacturers specs)
     for (uint8_t i = 9; i <= 11; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -GYRO_BIAS_LIMIT * dtEkfAvg, GYRO_BIAS_LIMIT * dtEkfAvg);
+    }
 
     // gyro scale factor limit of +-5% (this needs to be set based on manufacturers specs)
     for (uint8_t i = 12; i <= 14; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], 0.95f, 1.05f);
+    }
 
     // Z accel bias limit 1.0 m/s^2	(this needs to be finalised from test data)
     ekfStates.stateStruct.accel_zbias = constrainf(ekfStates.stateStruct.accel_zbias, -1.0f * dtEkfAvg, 1.0f * dtEkfAvg);
@@ -1781,7 +1823,9 @@ void ConstrainStates(void)
     {
         // constrain to +/-1Ga
         for (uint8_t i = 16; i <= 18; i++)
+        {
             ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -1.0f, 1.0f);
+        }
     }
     else
     {
@@ -1791,11 +1835,15 @@ void ConstrainStates(void)
 
     // body magnetic field limit
     for (uint8_t i = 19; i <= 21; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -0.5f, 0.5f);
+    }
 
     // wind velocity limit 100 m/s (could be based on some multiple of max airspeed * EAS2TAS) - TODO apply circular limit
     for (uint8_t i = 22; i <= 23; i++)
+    {
         ekfStates.statesArray[i] = constrainf(ekfStates.statesArray[i], -100.0f, 100.0f);
+    }
 
     // constrain the terrain state to be below the vehicle height unless we are using terrain as the height datum
     if (!inhibitGndState)
@@ -1963,7 +2011,7 @@ static int32_t diff_longitude(int32_t lon1, int32_t lon2)
 
 static float longitude_scale(int32_t lat)
 {
-    float scale = cosf(lat * (1.0e-7 * (M_PIf / 180.0f)));
+    float scale = cosf(lat * (1.0e-7f * (M_PIf / 180.0f)));
 
     return MAX(scale, 0.01f);
 }

@@ -1,3 +1,20 @@
+/*
+ * This file is part of INAV.
+ *
+ * INAV is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * INAV is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 #include "ekf/ekf.h"
 #include "ekf/ekfCore.h"
 
@@ -108,7 +125,7 @@ void FuseAirspeed(void)
 
         // fail if the ratio is > 1, but don't fail if bad IMU data
         bool tasHealth = ((tasTestRatio < 1.0f) || badIMUdata);
-        tasTimeout = (imuSampleTime_ms - lastTasPassTime_ms) > ekfParam.tasRetryTime_ms;
+        tasTimeout = (imuSampleTime_ms - lastTasPassTime_ms) > ekfInternalParam.tasRetryTime_ms;
 
         if (!tasHealth)
         {
@@ -209,7 +226,7 @@ void SelectTasFusion(void)
     readAirSpdData();
 
     // If we haven't received airspeed data for a while, then declare the airspeed data as being timed out
-    if (imuSampleTime_ms - tasDataNew.obs.time_ms > ekfParam.tasRetryTime_ms)
+    if (imuSampleTime_ms - tasDataNew.obs.time_ms > ekfInternalParam.tasRetryTime_ms)
     {
         tasTimeout = true;
     }
@@ -241,9 +258,9 @@ void SelectBetaFusion(void)
     }
 
     // set true when the fusion time interval has triggered
-    bool f_timeTrigger = ((imuSampleTime_ms - prevBetaStep_ms) >= ekfParam.betaAvg_ms);
+    bool f_timeTrigger = ((imuSampleTime_ms - prevBetaStep_ms) >= ekfInternalParam.betaAvg_ms);
     // set true when use of synthetic sideslip fusion is necessary because we have limited sensor data or are dead reckoning position
-    bool f_required = !(ekf_useCompass() && useAirspeed() && ((imuSampleTime_ms - lastPosPassTime_ms) < ekfParam.posRetryTimeNoVel_ms));
+    bool f_required = !(ekf_useCompass() && useAirspeed() && ((imuSampleTime_ms - lastPosPassTime_ms) < ekfInternalParam.posRetryTimeNoVel_ms));
     // set true when sideslip fusion is feasible (requires zero sideslip assumption to be valid and use of wind states)
     bool f_feasible = (assume_zero_sideslip() && !inhibitWindStates);
     // use synthetic sideslip fusion if feasible, required and enough time has lapsed since the last fusion

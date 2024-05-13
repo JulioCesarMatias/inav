@@ -270,12 +270,15 @@ main_sources(COMMON_SRC
     ekf/ekfAirDataFusion.c
     ekf/ekfBuffer.c
     ekf/ekfBuffer.h
+    ekf/ekfCompassLearn.c
+    ekf/ekfCompassLearn.h
     ekf/ekfControl.c
     ekf/ekfCore.c
     ekf/ekfCore.h
     ekf/EKFGSF_yaw.c
     ekf/EKFGSF_yaw.h
-    ekf/ekfGyroBias.c
+    ekf/ekfIntegrator.c
+    ekf/ekfIntegrator.h
     ekf/ekfMagFusion.c
     ekf/ekfMath.h
     ekf/ekfMeasurements.c

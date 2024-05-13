@@ -1,8 +1,14 @@
 #include "ekf/ekfCore.h"
 #include "ekf/ekfBuffer.h"
+#include "ekf/ekfIntegrator.h"
 
-// Read the range finder and take new measurements if available
-// Apply a median filter
+imuIntegrator accel_integrator;
+imuIntegratorConing gyro_integrator;
+
+bool accIntegratorInit;
+bool gyroIntegratorInit;
+
+// Read the range finder and take new measurements if available and apply a median filter
 void readRangeFinder(void)
 {
     uint8_t midIndex;
@@ -26,7 +32,7 @@ void readRangeFinder(void)
                 rngMeasIndex = 0;
             }
             storedRngMeasTime_ms[rngMeasIndex] = imuSampleTime_ms - 25;
-            storedRngMeas[rngMeasIndex] = rangefinderGetLatestRawAltitude() * 0.01f;
+            storedRngMeas[rngMeasIndex] = CENTIMETERS_TO_METERS(rangefinderGetLatestRawAltitude());
         }
 
         // check for three fresh samples
@@ -92,8 +98,7 @@ void readRangeFinder(void)
     }
 }
 
-// write the raw optical flow measurements
-// this needs to be called externally.
+// write the raw optical flow measurements this needs to be called externally.
 void writeOptFlowMeas(const uint8_t rawFlowQuality, const fpVector2_t rawFlowRates, const fpVector2_t rawGyroRates, const fpVector3_t posOffset, float heightOverride)
 {
     // The raw measurements need to be optical flow rates in radians/second averaged across the time since the last update
@@ -103,6 +108,7 @@ void writeOptFlowMeas(const uint8_t rawFlowQuality, const fpVector2_t rawFlowRat
     // This filter uses a different definition of optical flow rates to the sensor with a positive optical flow rate produced by a
     // negative rotation about that axis. For example a positive rotation of the flight vehicle about its X (roll) axis would produce a negative X flow rate
     flowMeaTime_ms = imuSampleTime_ms;
+
     // calculate bias errors on flow sensor gyro rates, but protect against spikes in data
     // reset the accumulated body delta angle and time
     // don't do the calculation if not enough time lapsed for a reliable body rate measurement
@@ -113,6 +119,7 @@ void writeOptFlowMeas(const uint8_t rawFlowQuality, const fpVector2_t rawFlowRat
         vectorZero(&delAngBodyOF);
         delTimeOF = 0.0f;
     }
+
     // by definition if this function is called, then flow measurements have been provided so we
     // need to run the optical flow takeoff detection
     detectOptFlowTakeoff();
@@ -126,6 +133,7 @@ void writeOptFlowMeas(const uint8_t rawFlowQuality, const fpVector2_t rawFlowRat
         // correct flow sensor body rates for bias and write
         ofDataNew.bodyRadXYZ.x = rawGyroRates.x - flowGyroBias.x;
         ofDataNew.bodyRadXYZ.y = rawGyroRates.y - flowGyroBias.y;
+
         // the sensor interface doesn't provide a z axis rate so use the rate from the nav sensor instead
         if (delTimeOF > 0.001f)
         {
@@ -142,64 +150,40 @@ void writeOptFlowMeas(const uint8_t rawFlowQuality, const fpVector2_t rawFlowRat
             // third preference is use zero
             ofDataNew.bodyRadXYZ.z = 0.0f;
         }
+
         // write uncorrected flow rate measurements
         // note correction for different axis and sign conventions used by the px4flow sensor
         ofDataNew.flowRadXY.x = -rawFlowRates.x; // raw (non motion compensated) optical flow angular rate about the X axis (rad/sec)
         ofDataNew.flowRadXY.y = -rawFlowRates.y; // raw (non motion compensated) optical flow angular rate about the X axis (rad/sec)
+
         // write the flow sensor position in body frame
         ofDataNew.body_offset = posOffset;
+
         // write the flow sensor height override
         ofDataNew.heightOverride = heightOverride;
+
         // write flow rate measurements corrected for body rates
         ofDataNew.flowRadXYcomp.x = ofDataNew.flowRadXY.x + ofDataNew.bodyRadXYZ.x;
         ofDataNew.flowRadXYcomp.y = ofDataNew.flowRadXY.y + ofDataNew.bodyRadXYZ.y;
+
         // record time last observation was received so we can detect loss of data elsewhere
         flowValidMeaTime_ms = imuSampleTime_ms;
+
         // estimate sample time of the measurement
-        ofDataNew.obs.time_ms = imuSampleTime_ms - ekfParam._flowDelay_ms - ekfParam.flowTimeDeltaAvg_ms / 2;
+        ofDataNew.obs.time_ms = imuSampleTime_ms - ekfParam._flowDelay_ms - ekfInternalParam.flowTimeDeltaAvg_ms / 2;
+
         // Correct for the average intersampling delay due to the filter updaterate
         ofDataNew.obs.time_ms -= localFilterTimeStep_ms / 2;
+
         // Prevent time delay exceeding age of oldest IMU data in the buffer
         ofDataNew.obs.time_ms = MAX(ofDataNew.obs.time_ms, imuDataDelayed.time_ms);
+
         // Save data to buffer
         ekf_ring_buffer_push(&storedOF, OPTFLOW_RING_BUFFER, &ofDataNew);
+
         // Check for data at the fusion time horizon
         flowDataToFuse = ekf_ring_buffer_recall(&storedOF, OPTFLOW_RING_BUFFER, &ofDataDelayed, imuDataDelayed.time_ms);
     }
-}
-
-bool compassConsistent(void)
-{
-    const fpVector3_t mag_field = getMagField();
-    const fpVector2_t mag_field_xy = {.v = {mag_field.x, mag_field.y}};
-
-    if (mag_field_xy.x == 0.0f && mag_field_xy.y == 0.0f)
-    {
-        return false;
-    }
-
-    // check for gross misalignment on all axes
-    const float xyz_ang_diff = get_3D_vector_angle(mag_field, mag_field);
-    if (xyz_ang_diff > COMPASS_MAX_XYZ_ANG_DIFF)
-    {
-        return false;
-    }
-
-    // check for an unacceptable angle difference on the xy plane
-    const float xy_ang_diff = get_2D_vector_angle(mag_field_xy, mag_field_xy);
-    if (xy_ang_diff > COMPASS_MAX_XY_ANG_DIFF)
-    {
-        return false;
-    }
-
-    // check for an unacceptable length difference on the xy plane
-    const float xy_len_diff = calc_length_pythagorean_2D(mag_field_xy.x - mag_field_xy.x, mag_field_xy.y - mag_field_xy.y);
-    if (xy_len_diff > COMPASS_MAX_XY_LENGTH_DIFF)
-    {
-        return false;
-    }
-
-    return true;
 }
 
 // check for new magnetometer data and update store measurements if available
@@ -219,20 +203,16 @@ void readMagData(void)
         return;
     }
 
-#ifndef SOLVE_AFTER
-    if (compass.learn_offsets_enabled())
+    if (ekfParam._ekfCompassLearn)
     {
         // while learning offsets keep all mag states reset
         InitialiseVariablesMag();
         wasLearningCompass_ms = imuSampleTime_ms;
     }
-    else
-#endif
-        if (wasLearningCompass_ms != 0 && imuSampleTime_ms - wasLearningCompass_ms > 1000)
+    else if (wasLearningCompass_ms != 0 && imuSampleTime_ms - wasLearningCompass_ms > 1000)
     {
         wasLearningCompass_ms = 0;
-        // force a new yaw alignment 1s after learning completes. The
-        // delay is to ensure any buffered mag samples are discarded
+        // force a new yaw alignment 1s after learning completes. The delay is to ensure any buffered mag samples are discarded
         yawAlignComplete = false;
         InitialiseVariablesMag();
     }
@@ -257,9 +237,7 @@ void readMagData(void)
             vectorZero(&ekfStates.stateStruct.body_magfield);
             // clear the measurement buffer
             ekf_ring_buffer_reset(&storedMag);
-            // reset body mag variances on next
-            // CovariancePrediction. This copes with possible errors
-            // in the new offsets
+            // reset body mag variances on next CovariancePrediction. This copes with possible errors in the new offsets
             needMagBodyVarReset = true;
         }
 
@@ -273,25 +251,66 @@ void readMagData(void)
         mag_elements_t magDataNew;
 
         // estimate of time magnetometer measurement was taken, allowing for delays
-        magDataNew.obs.time_ms = imuSampleTime_ms - ekfParam.magDelay_ms;
+        magDataNew.obs.time_ms = imuSampleTime_ms - ekfInternalParam.magDelay_ms;
 
         // Correct for the average intersampling delay due to the filter updaterate
         magDataNew.obs.time_ms -= localFilterTimeStep_ms / 2;
 
         // read compass data and scale to improve numerical conditioning
-        fpVector3_t magField = getMagField();
+        fpVector3_t magField = getUncorrectedMagField();
         magDataNew.mag.x = magField.x * 0.001f;
         magDataNew.mag.y = magField.y * 0.001f;
         magDataNew.mag.z = magField.z * 0.001f;
-
-        // check for consistent data between magnetometers
-        consistentMagData = compassConsistent();
 
         // save magnetometer measurement to buffer to be fused later
         ekf_ring_buffer_push(&storedMag, MAG_RING_BUFFER, &magDataNew);
 
         // remember time we read compass, to detect compass sensor failure
         lastMagRead_ms = imuSampleTime_ms;
+    }
+}
+
+// read the delta velocity and corresponding time interval from the IMU
+void readDeltaVelocity(fpVector3_t *dVel, float *dVel_dt)
+{
+    const float acc_dt = (float)getTaskDeltaTime(TASK_PID) * 1.0e-6f;
+
+    if (!accIntegratorInit)
+    {
+        accel_integrator.reset_interval_min = 1.0f / (float)ekfInternalParam.imuTimeHz;
+        accel_integrator.reset_samples_min = 8;
+        accIntegratorInit = true;
+    }
+
+    if (!integrator_reset_and_get_integral(&accel_integrator, dVel, dVel_dt))
+    {
+        fpVector3_t get_acc;
+        accGetMeasuredAcceleration(&get_acc);
+        // convert the accel in body frame in cm/s to m/s
+        get_acc.x = get_acc.x * 0.01f;
+        get_acc.y = get_acc.y * 0.01f;
+        get_acc.z = get_acc.z * 0.01f;
+        integrator_put(&accel_integrator, get_acc, acc_dt);
+    }
+}
+
+// read the delta angle and corresponding time interval from the IMU
+void readDeltaAngle(fpVector3_t *dAng, float *dAng_dt)
+{
+    const float gyro_dt = (float)getTaskDeltaTime(TASK_PID) * 1.0e-6f;
+
+    if (!gyroIntegratorInit)
+    {
+        gyro_integrator.base.reset_interval_min = 1.0f / (float)ekfInternalParam.imuTimeHz;
+        gyro_integrator.base.reset_samples_min = 8;
+        gyroIntegratorInit = true;
+    }
+
+    if (!integrator_coning_reset_and_get_integral(&gyro_integrator, dAng, dAng_dt))
+    {
+        fpVector3_t get_gyro;
+        gyroGetMeasuredRotationRate(&get_gyro);
+        integrator_coning_put(&gyro_integrator, get_gyro, gyro_dt);
     }
 }
 
@@ -304,10 +323,9 @@ void readMagData(void)
  */
 void readIMUData(void)
 {
-    // average IMU sampling rate
-    dtIMUavg = 1.0f / (float)ekfParam._imuTimeHz;
+    dtIMUavg = 1.0f / (float)ekfInternalParam.imuTimeHz;
 
-    // Get delta angle data from accelerometer
+    // Get delta velocity data from accelerometer
     readDeltaVelocity(&imuDataNew.delVel, &imuDataNew.delVelDT);
 
     // Get delta angle data from gyro
@@ -350,14 +368,14 @@ void readIMUData(void)
         // convert the accumulated quaternion to an equivalent delta angle
         quaternionToAxisAngleV(imuQuatDownSampleNew, &imuDataDownSampledNew.delAng);
 
-        // Time stamp the data
+        // time stamp the data
         imuDataDownSampledNew.time_ms = imuSampleTime_ms;
 
-        // Write data to the FIFO IMU buffer
+        // write data to the FIFO IMU buffer
         ekf_imu_buffer_push_youngest_element(&storedIMU, &imuDataDownSampledNew);
 
         // calculate the achieved average time step rate for the EKF
-        float dtNow = constrainf(0.5f * (imuDataDownSampledNew.delAngDT + imuDataDownSampledNew.delVelDT), 0.0f, 10.0f * EKF_TARGET_DT);
+        const float dtNow = constrainf(0.5f * (imuDataDownSampledNew.delAngDT + imuDataDownSampledNew.delVelDT), 0.0f, 10.0f * EKF_TARGET_DT);
         dtEkfAvg = 0.98f * dtEkfAvg + 0.02f * dtNow;
 
         // zero the accumulated IMU data and quaternion
@@ -382,8 +400,6 @@ void readIMUData(void)
         float minDT = 0.1f * dtEkfAvg;
         imuDataDelayed.delAngDT = MAX(imuDataDelayed.delAngDT, minDT);
         imuDataDelayed.delVelDT = MAX(imuDataDelayed.delVelDT, minDT);
-
-        updateTimingStatistics();
 
         // correct the extracted IMU data for sensor errors
         delAngCorrected = imuDataDelayed.delAng;
@@ -444,7 +460,7 @@ void readGpsData(void)
             // Apply a decaying envelope filter with a 5 second time constant to the raw accuracy data
             float alpha = constrainf(0.0002f * (lastTimeGpsReceived_ms - secondLastGpsTime_ms), 0.0f, 1.0f);
             gpsSpdAccuracy *= (1.0f - alpha);
-            float gpsSpdAccRaw = gpsSol.speed_accuracy * 0.01f;
+            float gpsSpdAccRaw = CENTIMETERS_TO_METERS(gpsSol.speed_accuracy);
             if (!gpsSol.speed_accuracy)
             {
                 gpsSpdAccuracy = 0.0f;
@@ -513,10 +529,10 @@ void readGpsData(void)
             calcGpsGoodForFlight();
 
             // see if we can get origin from frontend
-            if (!validOrigin && ekfParam.common_origin_valid)
+            if (!validOrigin && ekf_common_origin_valid)
             {
 
-                if (!setOrigin(&ekfParam.common_EKF_origin))
+                if (!setOrigin(&common_EKF_origin))
                 {
                     return;
                 }
@@ -556,7 +572,7 @@ void readGpsData(void)
                 if (compassIsCalibrationComplete() && positionEstimationConfig()->automatic_mag_declination)
                 {
 #ifndef SOLVE_AFTER
-                    table_earth_field_ga = AP_Declination::get_earth_field_ga(gpsloc);
+                    table_earth_field_ga = get_earth_field_ga(gpsloc);
 #endif
                     table_declination = geoCalculateMagDeclination(&gpsloc);
                     have_table_earth_field = true;
@@ -590,41 +606,6 @@ void readGpsData(void)
             sendEKFLogMessage("EKF waiting for 3D fix");
         }
     }
-}
-
-// read the delta velocity and corresponding time interval from the IMU
-void readDeltaVelocity(fpVector3_t *dVel, float *dVel_dt)
-{
-    const float acc_dt = (float)getTaskDeltaTime(TASK_PID) * 1.0e-6f;
-    accGetMeasuredAcceleration(dVel); // Calculate accel in body frame in cm/s
-
-    // convert the accel in body frame in cm/s to m/s
-    dVel->x *= 0.01f;
-    dVel->y *= 0.01f;
-    dVel->z *= 0.01f;
-
-    dVel->x *= acc_dt;
-    dVel->y *= acc_dt;
-    dVel->z *= acc_dt;
-
-    *dVel_dt = acc_dt;
-    *dVel_dt = MAX(*dVel_dt, 1.0e-4f);
-    *dVel_dt = MIN(*dVel_dt, 1.0e-1f);
-}
-
-// read the delta angle and corresponding time interval from the IMU
-void readDeltaAngle(fpVector3_t *dAng, float *dAng_dt)
-{
-    const float gyro_dt = (float)getTaskDeltaTime(TASK_GYRO) * 1.0e-6f;
-    gyroGetMeasuredRotationRate(dAng); // Calculate gyro rate in body frame in rad/s
-
-    dAng->x *= gyro_dt;
-    dAng->y *= gyro_dt;
-    dAng->z *= gyro_dt;
-
-    *dAng_dt = gyro_dt;
-    *dAng_dt = MAX(*dAng_dt, 1.0e-4f);
-    *dAng_dt = MIN(*dAng_dt, 1.0e-1f);
 }
 
 // check for new pressure altitude measurement data and update stored measurement if available
@@ -727,7 +708,7 @@ void readAirSpdData(void)
     {
         tasDataNew.tas = CENTIMETERS_TO_METERS(getAirspeedEstimate());
         timeTasReceived_ms = pitot.lastSeenHealthyMs;
-        tasDataNew.obs.time_ms = timeTasReceived_ms - ekfParam.tasDelay_ms;
+        tasDataNew.obs.time_ms = timeTasReceived_ms - ekfInternalParam.tasDelay_ms;
 
         // Correct for the average intersampling delay due to the filter update rate
         tasDataNew.obs.time_ms -= localFilterTimeStep_ms / 2;
@@ -739,39 +720,7 @@ void readAirSpdData(void)
     tasDataToFuse = ekf_ring_buffer_recall(&storedTAS, TAS_RING_BUFFER, &tasDataDelayed, imuDataDelayed.time_ms);
 }
 
-/*
-  update timing statistics structure
- */
-void updateTimingStatistics(void)
-{
-    if (timing.count == 0)
-    {
-        timing.dtIMUavg_max = dtIMUavg;
-        timing.dtIMUavg_min = dtIMUavg;
-        timing.dtEKFavg_max = dtEkfAvg;
-        timing.dtEKFavg_min = dtEkfAvg;
-        timing.delAngDT_max = imuDataDelayed.delAngDT;
-        timing.delAngDT_min = imuDataDelayed.delAngDT;
-        timing.delVelDT_max = imuDataDelayed.delVelDT;
-        timing.delVelDT_min = imuDataDelayed.delVelDT;
-    }
-    else
-    {
-        timing.dtIMUavg_max = MAX(timing.dtIMUavg_max, dtIMUavg);
-        timing.dtIMUavg_min = MIN(timing.dtIMUavg_min, dtIMUavg);
-        timing.dtEKFavg_max = MAX(timing.dtEKFavg_max, dtEkfAvg);
-        timing.dtEKFavg_min = MIN(timing.dtEKFavg_min, dtEkfAvg);
-        timing.delAngDT_max = MAX(timing.delAngDT_max, imuDataDelayed.delAngDT);
-        timing.delAngDT_min = MIN(timing.delAngDT_min, imuDataDelayed.delAngDT);
-        timing.delVelDT_max = MAX(timing.delVelDT_max, imuDataDelayed.delVelDT);
-        timing.delVelDT_min = MIN(timing.delVelDT_min, imuDataDelayed.delVelDT);
-    }
-    timing.count++;
-}
-
-/*
-  return declination in radians
-*/
+// return declination in radians
 float MagDeclination(void)
 {
     // if we are using the WMM tables then use the table declination

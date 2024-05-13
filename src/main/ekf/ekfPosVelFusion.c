@@ -1,3 +1,19 @@
+/*
+ * This file is part of INAV.
+ *
+ * INAV is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * INAV is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
+ */
 #include "ekf/ekf.h"
 #include "ekf/ekfCore.h"
 #include "ekf/ekfBuffer.h"
@@ -357,7 +373,7 @@ void FuseVelPosNED(void)
     {
 
         // calculate additional error in GPS position caused by manoeuvring
-        float posErr = ekfParam.gpsPosVarAccScale * accNavMag;
+        float posErr = ekfInternalParam.gpsPosVarAccScale * accNavMag;
 
         // estimate the GPS Velocity, GPS horiz position and height measurement variances.
         // Use different errors if operating without external aiding using an assumed position or velocity of zero
@@ -391,8 +407,8 @@ void FuseVelPosNED(void)
             else
             {
                 // calculate additional error in GPS velocity caused by manoeuvring
-                R_OBS[0] = sq(constrainf(ekfParam._gpsHorizVelNoise, 0.05f, 5.0f)) + sq(ekfParam.gpsNEVelVarAccScale * accNavMag);
-                R_OBS[2] = sq(constrainf(ekfParam._gpsVertVelNoise, 0.05f, 5.0f)) + sq(ekfParam.gpsDVelVarAccScale * accNavMag);
+                R_OBS[0] = sq(constrainf(ekfParam._gpsHorizVelNoise, 0.05f, 5.0f)) + sq(ekfInternalParam.gpsNEVelVarAccScale * accNavMag);
+                R_OBS[2] = sq(constrainf(ekfParam._gpsVertVelNoise, 0.05f, 5.0f)) + sq(ekfInternalParam.gpsDVelVarAccScale * accNavMag);
             }
             R_OBS[1] = R_OBS[0];
             // Use GPS reported position accuracy if available and floor at value set by GPS position noise parameter
@@ -409,12 +425,16 @@ void FuseVelPosNED(void)
             // For horizontal GPS velocity we don't want the acceptance radius to increase with reported GPS accuracy so we use a value based on best GPS perfomrance
             // plus a margin for manoeuvres. It is better to reject GPS horizontal velocity errors early
             float obs_data_chk;
-            obs_data_chk = sq(constrainf(ekfParam._gpsHorizVelNoise, 0.05f, 5.0f)) + sq(ekfParam.gpsNEVelVarAccScale * accNavMag);
+            obs_data_chk = sq(constrainf(ekfParam._gpsHorizVelNoise, 0.05f, 5.0f)) + sq(ekfInternalParam.gpsNEVelVarAccScale * accNavMag);
             R_OBS_DATA_CHECKS[0] = R_OBS_DATA_CHECKS[1] = R_OBS_DATA_CHECKS[2] = obs_data_chk;
         }
+
         R_OBS[5] = posDownObsNoise;
+
         for (uint8_t i = 3; i <= 5; i++)
+        {
             R_OBS_DATA_CHECKS[i] = R_OBS[i];
+        }
 
         // if vertical GPS velocity data and an independent height source is being used, check to see if the GPS vertical velocity and altimeter
         // innovations have the same sign and are outside limits. If so, then it is likely aliasing is affecting
@@ -540,7 +560,7 @@ void FuseVelPosNED(void)
             // when on ground we accept a larger test ratio to allow
             // the filter to handle large switch on IMU bias errors
             // without rejecting the height sensor
-            const float maxTestRatio = (PV_AidingMode == AID_NONE && onGround) ? 3.0 : 1.0;
+            const float maxTestRatio = (PV_AidingMode == AID_NONE && onGround) ? 3.0f : 1.0f;
 
             // fail if the ratio is > maxTestRatio, but don't fail if bad IMU data
             hgtHealth = (hgtTestRatio < maxTestRatio) || badIMUdata;
@@ -639,6 +659,7 @@ void FuseVelPosNED(void)
                 // calculate the Kalman gain and calculate innovation variances
                 varInnovVelPos[obsIndex] = P[stateIndex][stateIndex] + R_OBS[obsIndex];
                 SK = 1.0f / varInnovVelPos[obsIndex];
+
                 for (uint8_t i = 0; i <= 15; i++)
                 {
                     Kfusion[i] = P[i][stateIndex] * SK;
@@ -879,7 +900,7 @@ void selectHeightForFusion(void)
         if (!get_takeoff_expected())
         {
             const float gndHgtFiltTC = 0.5f;
-            const float dtBaro = ekfParam.hgtAvg_ms * 1.0e-3;
+            const float dtBaro = ekfInternalParam.hgtAvg_ms * 1.0e-3f;
             float alpha = constrainf(dtBaro / (dtBaro + gndHgtFiltTC), 0.0f, 1.0f);
             meaHgtAtTakeOff += (baroDataDelayed.hgt - meaHgtAtTakeOff) * alpha;
         }
@@ -949,7 +970,7 @@ void selectHeightForFusion(void)
         // reduce weighting (increase observation noise) on baro if we are likely to be in ground effect
         if (get_takeoff_expected() || get_touchdown_expected())
         {
-            posDownObsNoise *= ekfParam.gndEffectBaroScaler;
+            posDownObsNoise *= ekfInternalParam.gndEffectBaroScaler;
         }
         // If we are in takeoff mode, the height measurement is limited to be no less than the measurement at start of takeoff
         // This prevents negative baro disturbances due to copter downwash corrupting the EKF altitude during initial ascent
@@ -965,7 +986,7 @@ void selectHeightForFusion(void)
 
     // If we haven't fused height data for a while, then declare the height data as being timed out
     // set timeout period based on whether we have vertical GPS velocity available to constrain drift
-    hgtRetryTime_ms = (useGpsVertVel && !velTimeout) ? ekfParam.hgtRetryTimeMode0_ms : ekfParam.hgtRetryTimeMode12_ms;
+    hgtRetryTime_ms = (useGpsVertVel && !velTimeout) ? ekfInternalParam.hgtRetryTimeMode0_ms : ekfInternalParam.hgtRetryTimeMode12_ms;
     if (imuSampleTime_ms - lastHgtPassTime_ms > hgtRetryTime_ms)
     {
         hgtTimeout = true;

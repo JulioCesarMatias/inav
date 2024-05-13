@@ -494,7 +494,7 @@ void compassUpdate(timeUs_t currentTimeUs)
 }
 
 // Get rotated magnetometer field without off-set
-fpVector3_t getMagField(void)
+fpVector3_t getUncorrectedMagField(void)
 {
     fpVector3_t field = {.v = {mag.magADC[X] * compassConfig()->magGain[X] / 1024 + compassConfig()->magZero.raw[X],
                                mag.magADC[Y] * compassConfig()->magGain[Y] / 1024 + compassConfig()->magZero.raw[Y],

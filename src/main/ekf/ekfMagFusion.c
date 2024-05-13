@@ -1,3 +1,19 @@
+/*
+ * This file is part of INAV.
+ *
+ * INAV is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * INAV is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
+ */
 #include "ekf/ekf.h"
 #include "ekf/ekfCore.h"
 #include "ekf/ekfBuffer.h"
@@ -222,7 +238,7 @@ void SelectMagFusion(void)
         magTimeout = false;
         lastHealthyMagTime_ms = imuSampleTime_ms;
     }
-    else if ((imuSampleTime_ms - lastHealthyMagTime_ms) > ekfParam.magFailTimeLimit_ms && ekf_useCompass())
+    else if ((imuSampleTime_ms - lastHealthyMagTime_ms) > ekfInternalParam.magFailTimeLimit_ms && ekf_useCompass())
     {
         magTimeout = true;
     }
@@ -348,7 +364,7 @@ void FuseMagnetometer(void)
     }
 
     // scale magnetometer observation error with total angular rate to allow for timing errors
-    *R_MAG = sq(constrainf(ekfParam._magNoise, 0.01f, 0.5f)) + sq(ekfParam.magVarRateScale * calc_length_pythagorean_3D(delAngCorrected.x, delAngCorrected.y, delAngCorrected.z) / imuDataDelayed.delAngDT);
+    *R_MAG = sq(constrainf(ekfParam._magNoise, 0.01f, 0.5f)) + sq(ekfInternalParam.magVarRateScale * calc_length_pythagorean_3D(delAngCorrected.x, delAngCorrected.y, delAngCorrected.z) / imuDataDelayed.delAngDT);
 
     // calculate common expressions used to calculate observation jacobians an innovation variance for each component
     SH_MAG[0] = sq(*q0) - sq(*q1) + sq(*q2) - sq(*q3);
@@ -814,7 +830,7 @@ void fuseEulerYaw(void)
                 if (EKFGSF_yaw_getYawData(&gsfYaw, &gsfYawVariance) &&
                     gsfYawVariance >= 0 &&
                     gsfYawVariance < sq(DEGREES_TO_RADIANS(15.0f)) &&
-                    (assume_zero_sideslip() || (EKFGSF_yaw_getVelInnovLength(&velInnovLength) && velInnovLength < ekfParam.maxYawEstVelInnov)))
+                    (assume_zero_sideslip() || (EKFGSF_yaw_getVelInnovLength(&velInnovLength) && velInnovLength < ekfInternalParam.maxYawEstVelInnov)))
                 {
                     measured_yaw = gsfYaw;
                     R_YAW = gsfYawVariance;
@@ -887,7 +903,7 @@ void fuseEulerYaw(void)
                 if (EKFGSF_yaw_getYawData(&gsfYaw, &gsfYawVariance) &&
                     gsfYawVariance >= 0 &&
                     gsfYawVariance < sq(DEGREES_TO_RADIANS(15.0f)) &&
-                    (assume_zero_sideslip() || (EKFGSF_yaw_getVelInnovLength(&velInnovLength) && velInnovLength < ekfParam.maxYawEstVelInnov)))
+                    (assume_zero_sideslip() || (EKFGSF_yaw_getVelInnovLength(&velInnovLength) && velInnovLength < ekfInternalParam.maxYawEstVelInnov)))
                 {
                     measured_yaw = gsfYaw;
                     R_YAW = gsfYawVariance;
@@ -1262,7 +1278,7 @@ bool EKFGSF_resetMainFilterYaw(void)
     if (EKFGSF_yaw_getYawData(&yawEKFGSF, &yawVarianceEKFGSF) &&
         yawVarianceEKFGSF >= 0 &&
         yawVarianceEKFGSF < sq(DEGREES_TO_RADIANS(15.0f)) &&
-        (assume_zero_sideslip() || (EKFGSF_yaw_getVelInnovLength(&velInnovLength) && velInnovLength < ekfParam.maxYawEstVelInnov)))
+        (assume_zero_sideslip() || (EKFGSF_yaw_getVelInnovLength(&velInnovLength) && velInnovLength < ekfInternalParam.maxYawEstVelInnov)))
     {
 
         // keep roll and pitch and reset yaw
@@ -1340,8 +1356,7 @@ void resetQuatStateYawOnly(float yaw, float yawVariance, bool isDeltaYaw)
 
     // rotate attitude error variances into earth frame
     fpVector3_t bf_variances = {.v = {P[0][0], P[1][1], P[2][2]}};
-    fpMat3_t mTransposed = matrixTransposed(prevTnb);
-    fpVector3_t ef_variances = multiplyMatrixByVector(mTransposed, bf_variances);
+    fpVector3_t ef_variances = multiplyMatrixByVector(matrixTransposed(prevTnb), bf_variances);
 
     // reset vertical component to supplied value
     ef_variances.z = yawVariance;

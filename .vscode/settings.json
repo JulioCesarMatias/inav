@@ -14,6 +14,12 @@
         "locale": "c",
         "tuple": "c",
         "variant": "c",
-        "time.h": "c"
+        "time.h": "c",
+        "__node_handle": "c",
+        "__locale": "c",
+        "inttypes.h": "c",
+        "navigation_private.h": "c",
+        "navigation_pos_estimator_private.h": "c",
+        "ekfgsf_yaw.h": "c"
     }
 }

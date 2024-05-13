@@ -1,4 +1,21 @@
 /*
+ * This file is part of INAV.
+ *
+ * INAV is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * INAV is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/*
   Definition of functions used to provide a backup estimate of yaw angle
   that doesn't use a magnetometer. Uses a bank of 3-state EKF's organised
   as a Guassian sum filter where states are velocity N,E (m/s) and yaw angle (rad)
@@ -26,7 +43,7 @@
 
 typedef struct
 {
-    fpMat3_t R;         // matrix that rotates a vector from body to earth frame
+    fpMat3_t R;            // matrix that rotates a vector from body to earth frame
     fpVector3_t gyro_bias; // gyro bias learned and used by the quaternion calculation
     bool aligned;          // true when AHRS has been aligned
     float accel_FR[2];     // front-right acceleration vector in a horizontal plane (m/s/s)
@@ -137,7 +154,7 @@ void EKFGSF_yaw_update(const fpVector3_t delAng,
     // Iniitialise states and only when acceleration is close to 1g to prevent vehicle movement casuing a large initial tilt error
     if (!ahrs_tilt_aligned)
     {
-        const float accel_norm_sq = vector_squared_length(accel);
+        const float accel_norm_sq = accel.x * accel.x + accel.y * accel.y + accel.z * accel.z;
         const float upper_accel_limit = GRAVITY_MSS * 1.1f;
         const float lower_accel_limit = GRAVITY_MSS * 0.9f;
         const bool ok_to_align = ((accel_norm_sq > lower_accel_limit * lower_accel_limit &&
@@ -336,7 +353,8 @@ void EKFGSF_yaw_predictAHRS(const uint8_t mdl_idx)
 
     // Gyro bias estimation
     const float gyro_bias_limit = DEGREES_TO_RADIANS(5.0f);
-    const float spinRate_squared = vector_squared_length(ang_rate_delayed_raw);
+    const float spinRate_squared = ang_rate_delayed_raw.x * ang_rate_delayed_raw.x + ang_rate_delayed_raw.y * ang_rate_delayed_raw.y + ang_rate_delayed_raw.z * ang_rate_delayed_raw.z;
+
     if (spinRate_squared < sq(0.175f))
     {
         AHRS[mdl_idx].gyro_bias.x -= tilt_error_gyro_correction.x * (EKFGSF_gyroBiasGain * angle_dt);
@@ -359,6 +377,7 @@ void EKFGSF_yaw_predictAHRS(const uint8_t mdl_idx)
     fpVector3_t ahrs_delta_angle = {.v = {delta_angle.x + (tilt_error_gyro_correction.x - AHRS[mdl_idx].gyro_bias.x) * angle_dt,
                                           delta_angle.y + (tilt_error_gyro_correction.y - AHRS[mdl_idx].gyro_bias.y) * angle_dt,
                                           delta_angle.z + (tilt_error_gyro_correction.z - AHRS[mdl_idx].gyro_bias.z) * angle_dt}};
+
     AHRS[mdl_idx].R = EKFGSF_yaw_updateRotMat(AHRS[mdl_idx].R, ahrs_delta_angle);
 }
 
@@ -373,6 +392,7 @@ void EKFGSF_yaw_alignTilt(void)
     fpVector3_t down_in_bf = {.v = {-delta_velocity.x,
                                     -delta_velocity.y,
                                     -delta_velocity.z}};
+
     vectorNormalize(&down_in_bf, &down_in_bf);
 
     // Calculate earth frame North axis unit vector rotated into body frame, orthogonal to 'down_in_bf'
@@ -381,6 +401,7 @@ void EKFGSF_yaw_alignTilt(void)
     fpVector3_t north_in_bf = {.v = {i_vec_bf.x - down_in_bf.x * (i_vec_bf.x * down_in_bf.x),
                                      i_vec_bf.y - down_in_bf.y * (i_vec_bf.y * down_in_bf.y),
                                      i_vec_bf.z - down_in_bf.z * (i_vec_bf.z * down_in_bf.z)}};
+
     vectorNormalize(&north_in_bf, &north_in_bf);
 
     // Calculate earth frame East axis unit vector rotated into body frame, orthogonal to 'down_in_bf' and 'north_in_bf'
@@ -388,6 +409,7 @@ void EKFGSF_yaw_alignTilt(void)
     fpVector3_t remainderResult = {.v = {down_in_bf.y * north_in_bf.z - down_in_bf.z * north_in_bf.y,
                                          down_in_bf.z * north_in_bf.x - down_in_bf.x * north_in_bf.z,
                                          down_in_bf.x * north_in_bf.y - down_in_bf.y * north_in_bf.x}};
+
     fpVector3_t east_in_bf = remainderResult;
 
     // Each column in a rotation matrix from earth frame to body frame represents the projection of the
@@ -774,9 +796,7 @@ fpMat3_t EKFGSF_yaw_updateRotMat(const fpMat3_t R, const fpVector3_t g)
     return ret;
 }
 
-// returns true if a yaw estimate is available.  yaw and its variance
-// is returned, as well as the number of models which are *not* being
-// used to snthesise the yaw.
+// returns true if a yaw estimate is available. yaw and its variance is returned.
 bool EKFGSF_yaw_getYawData(float *yaw, float *yawVariance)
 {
     if (!vel_fuse_running)
@@ -788,6 +808,12 @@ bool EKFGSF_yaw_getYawData(float *yaw, float *yawVariance)
     *yawVariance = GSF.yaw_variance;
 
     return true;
+}
+
+// n_clips will contain the number of models which were *not* used to create the yaw and yawVariance return values.
+uint8_t EKFGSF_yaw_getNClips(void)
+{
+    return n_clips;
 }
 
 bool EKFGSF_yaw_getVelInnovLength(float *velInnovLength)

@@ -5,11 +5,11 @@
 // wrap an angle defined in radians to -PI ~ PI
 static inline float wrap_2PI(const float radian)
 {
-  float res = fmodf(radian, 2 * M_PIf);
+  float res = fmodf(radian, 2.0f * M_PIf);
 
   if (res < 0)
   {
-    res += 2 * M_PIf;
+    res += (2.0f * M_PIf);
   }
 
   return res;
@@ -20,67 +20,12 @@ static inline float wrap_PI(const float radian)
 {
   float res = wrap_2PI(radian);
 
-  if (res > M_PI)
+  if (res > M_PIf)
   {
-    res -= 2 * M_PIf;
+    res -= (2.0f * M_PIf);
   }
 
   return res;
-}
-
-// Function to calculate the squared length of a vector
-static inline float vector_squared_length(fpVector3_t vec)
-{
-  return vec.x * vec.x + vec.y * vec.y + vec.z * vec.z;
-}
-
-static inline float get_2D_vector_angle(const fpVector2_t v1, const fpVector2_t v2)
-{
-  const float len = calc_length_pythagorean_2D(v1.x, v1.y) * calc_length_pythagorean_2D(v2.x, v2.y);
-
-  if (len <= 0)
-  {
-    return 0.0f;
-  }
-
-  // Calculate the dot product of the two vectors
-  float dot_product = v1.x * v2.x + v1.y * v2.y;
-
-  const float cosv = dot_product / len;
-
-  if (cosv >= 1)
-  {
-    return 0.0f;
-  }
-
-  if (cosv <= -1)
-  {
-    return M_PIf;
-  }
-
-  return acosf(cosv);
-}
-
-static inline float get_3D_vector_angle(const fpVector3_t v1, const fpVector3_t v2)
-{
-  const float len = calc_length_pythagorean_3D(v1.x, v1.y, v1.z) * calc_length_pythagorean_3D(v2.x, v2.y, v2.z);
-
-  if (len <= 0)
-  {
-    return 0.0f;
-  }
-
-  // Calculate the dot product of the two vectors
-  float dot_product = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
-
-  const float cosv = dot_product / len;
-
-  if (fabsf(cosv) >= 1)
-  {
-    return 0.0f;
-  }
-
-  return acosf(cosv);
 }
 
 static inline void zeroMatrix(fpMat3_t *matrix)
@@ -176,23 +121,23 @@ static inline fpMat3_t matrix_from_euler312(float roll, float pitch, float yaw)
   const float c1 = cosf(yaw);
 
   m.m[0][0] = c1 * c3 - s1 * s2 * s3;
-  m.m[1][1] = c1 * c2;
-  m.m[2][2] = c3 * c2;
   m.m[0][1] = -c2 * s1;
   m.m[0][2] = s3 * c1 + c3 * s2 * s1;
   m.m[1][0] = c3 * s1 + s3 * s2 * c1;
+  m.m[1][1] = c1 * c2;
   m.m[1][2] = s1 * s3 - s2 * c1 * c3;
   m.m[2][0] = -s3 * c2;
   m.m[2][1] = s2;
+  m.m[2][2] = c3 * c2;
 
   return m;
 }
 
 static inline fpMat3_t matrixTransposed(const fpMat3_t m)
 {
-  fpMat3_t result = {{{m.m[0][0], m.m[1][0], m.m[2][0]},
-                      {m.m[0][1], m.m[1][1], m.m[2][1]},
-                      {m.m[0][2], m.m[1][2], m.m[2][2]}}};
+  const fpMat3_t result = {{{m.m[0][0], m.m[1][0], m.m[2][0]},
+                            {m.m[0][1], m.m[1][1], m.m[2][1]},
+                            {m.m[0][2], m.m[1][2], m.m[2][2]}}};
 
   return result;
 }

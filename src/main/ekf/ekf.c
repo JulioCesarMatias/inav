@@ -1,3 +1,20 @@
+/*
+ * This file is part of INAV.
+ *
+ * INAV is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * INAV is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 #include "ekf/ekf.h"
 #include "ekf/ekfCore.h"
 #include "ekf/ekfBuffer.h"
@@ -78,14 +95,15 @@
 #define FLOW_USE_DEFAULT        2
 */
 
-ekfParam_t ekfParam;
+ekfParam_t ekfParam;                 // User EKF Tuneable Parameters
+ekfInternalParam_t ekfInternalParam; // Developer configurable params
 
-bool ekf_started; // boolean true when EKF have been initialised
+bool ekf_started; // true when EKF have been initialised
 
 // Initialise the filter
 bool ekfInitialiseFilter(void)
 {
-    if (ekfParam._enable == 0)
+    if (!ekfParam._enable)
     {
         // return false;
     }
@@ -138,34 +156,27 @@ bool ekfInitialiseFilter(void)
     ekfParam._gsfResetMaxCount = 2;                         // maximum number of times the EKF is allowed to reset it's yaw to the EKF-GSF estimate
 
     // Developer configurable params
-    ekfParam.gpsNEVelVarAccScale = 0.05f;                                                                         // Scale factor applied to NE velocity measurement variance due to manoeuvre acceleration
-    ekfParam.gpsDVelVarAccScale = 0.07f;                                                                          // Scale factor applied to vertical velocity measurement variance due to manoeuvre acceleration
-    ekfParam.gpsPosVarAccScale = 0.05f;                                                                           // Scale factor applied to horizontal position measurement variance due to manoeuvre acceleration
-    ekfParam.magDelay_ms = 60;                                                                                    // Magnetometer measurement delay (msec)
-    ekfParam.tasDelay_ms = 240;                                                                                   // Airspeed measurement delay (msec)
-    ekfParam.tiltDriftTimeMax_ms = 15000;                                                                         // Maximum number of ms allowed without any form of tilt aiding (GPS, flow, TAS, etc)
-    ekfParam.posRetryTimeUseVel_ms = 10000;                                                                       // Position aiding retry time with velocity measurements (msec)
-    ekfParam.posRetryTimeNoVel_ms = 7000;                                                                         // Position aiding retry time without velocity measurements (msec)
-    ekfParam.hgtRetryTimeMode0_ms = 10000;                                                                        // Height retry time with vertical velocity measurement (msec)
-    ekfParam.hgtRetryTimeMode12_ms = 5000;                                                                        // Height retry time without vertical velocity measurement (msec)
-    ekfParam.tasRetryTime_ms = 5000;                                                                              // True airspeed timeout and retry interval (msec)
-    ekfParam.magFailTimeLimit_ms = 10000;                                                                         // number of msec before a magnetometer failing innovation consistency checks is declared failed (msec)
-    ekfParam.magVarRateScale = 0.005f;                                                                            // scale factor applied to magnetometer variance due to angular rate
-    ekfParam.gyroBiasNoiseScaler = 2.0f;                                                                          // scale factor applied to gyro bias state process noise when on ground
-    ekfParam.hgtAvg_ms = 100;                                                                                     // average number of msec between height measurements
-    ekfParam.betaAvg_ms = 100;                                                                                    // average number of msec between synthetic sideslip measurements
-    ekfParam.covTimeStepMax = 0.1f;                                                                               // maximum time (sec) between covariance prediction updates
-    ekfParam.covDelAngMax = 0.05f;                                                                                // maximum delta angle between covariance prediction updates
-    ekfParam.DCM33FlowMin = 0.71f;                                                                                // If Tbn(3,3) is less than this number, optical flow measurements will not be fused as tilt is too high.
-    ekfParam.fScaleFactorPnoise = 1e-10f;                                                                         // Process noise added to focal length scale factor state variance at each time step
-    ekfParam.flowTimeDeltaAvg_ms = 100;                                                                           // average interval between optical flow measurements (msec)
-    ekfParam.flowIntervalMax_ms = 100;                                                                            // maximum allowable time between flow fusion events
-    ekfParam.gndEffectBaroScaler = 4.0f;                                                                          // scaler applied to the barometer observation variance when ground effect mode is active
-    ekfParam.maxYawEstVelInnov = 2.0f;                                                                            // Maximum acceptable length of the velocity innovation returned by the EKF-GSF yaw estimator (m/s)
-    ekfParam._frameTimeUsec = getLooptime();                                                                      // get the value of loop-time
-    ekfParam._imuTimeHz = 1000000 / ekfParam._frameTimeUsec;                                                      // convert loop-time in us to Hz
-    ekfParam._framesPerPrediction = (uint8_t)(EKF_TARGET_DT / ((float)ekfParam._frameTimeUsec * 1.0e-6f) + 0.5f); // expected number of IMU frames per prediction
-    ekfParam.common_origin_valid = false;                                                                         // invalidate shared origin
+    ekfInternalParam.gpsNEVelVarAccScale = 0.05f;                                                              // Scale factor applied to NE velocity measurement variance due to manoeuvre acceleration
+    ekfInternalParam.gpsDVelVarAccScale = 0.07f;                                                               // Scale factor applied to vertical velocity measurement variance due to manoeuvre acceleration
+    ekfInternalParam.gpsPosVarAccScale = 0.05f;                                                                // Scale factor applied to horizontal position measurement variance due to manoeuvre acceleration
+    ekfInternalParam.magDelay_ms = 60;                                                                         // Magnetometer measurement delay (msec)
+    ekfInternalParam.tasDelay_ms = 240;                                                                        // Airspeed measurement delay (msec)
+    ekfInternalParam.tiltDriftTimeMax_ms = 15000;                                                              // Maximum number of ms allowed without any form of tilt aiding (GPS, flow, TAS, etc)
+    ekfInternalParam.posRetryTimeUseVel_ms = 10000;                                                            // Position aiding retry time with velocity measurements (msec)
+    ekfInternalParam.posRetryTimeNoVel_ms = 7000;                                                              // Position aiding retry time without velocity measurements (msec)
+    ekfInternalParam.hgtRetryTimeMode0_ms = 10000;                                                             // Height retry time with vertical velocity measurement (msec)
+    ekfInternalParam.hgtRetryTimeMode12_ms = 5000;                                                             // Height retry time without vertical velocity measurement (msec)
+    ekfInternalParam.tasRetryTime_ms = 5000;                                                                   // True airspeed timeout and retry interval (msec)
+    ekfInternalParam.magFailTimeLimit_ms = 10000;                                                              // number of msec before a magnetometer failing innovation consistency checks is declared failed (msec)
+    ekfInternalParam.magVarRateScale = 0.005f;                                                                 // scale factor applied to magnetometer variance due to angular rate
+    ekfInternalParam.hgtAvg_ms = 100;                                                                          // average number of msec between height measurements
+    ekfInternalParam.betaAvg_ms = 100;                                                                         // average number of msec between synthetic sideslip measurements
+    ekfInternalParam.DCM33FlowMin = 0.71f;                                                                     // If Tbn(3,3) is less than this number, optical flow measurements will not be fused as tilt is too high.
+    ekfInternalParam.flowTimeDeltaAvg_ms = 100;                                                                // average interval between optical flow measurements (msec)
+    ekfInternalParam.gndEffectBaroScaler = 4.0f;                                                               // scaler applied to the barometer observation variance when ground effect mode is active
+    ekfInternalParam.maxYawEstVelInnov = 2.0f;                                                                 // Maximum acceptable length of the velocity innovation returned by the EKF-GSF yaw estimator (m/s)
+    ekfInternalParam.imuTimeHz = 1000000U / (uint16_t)getLooptime();                                           // convert loop-time in us to Hz
+    ekfInternalParam.framesPerPrediction = (uint8_t)(EKF_TARGET_DT / ((float)getLooptime() * 1.0e-6f) + 0.5f); // expected number of IMU frames per prediction
 
     if (!setupEKFRingBuffer())
     {
@@ -187,15 +198,13 @@ bool ekfInitialiseFilter(void)
 // Update Filter States - this should be called whenever new IMU data is available
 void ekfUpdateFilter(void)
 {
-    timeUs_t ekf_time_us = micros();
-
     if (!ekf_started)
     {
-        if (ekfStartTime_us == 0)
+        if (ekfStartTime_ms == 0)
         {
-            ekfStartTime_us = ekf_time_us;
+            ekfStartTime_ms = millis();
         }
-        if (ekf_time_us - ekfStartTime_us > MS2US(2000))
+        if (millis() - ekfStartTime_ms > 5000)
         {
             ekf_started = ekfInitialiseFilter();
         }
@@ -207,35 +216,32 @@ void ekfUpdateFilter(void)
 
         bool statePredictEnabled = true;
 
-        if (getFramesSincePredict() < (ekfParam._framesPerPrediction + 3) &&
-            US2S(ekf_time_us - cfTasks[TASK_PID].lastExecutedAt) > (1.0f / (float)ekfParam._imuTimeHz) * 0.33f)
+        // check if we have not overrun by more than 3 IMU frames
+        if (getFramesSincePredict() < (ekfInternalParam.framesPerPrediction + 3))
         {
             statePredictEnabled = false;
         }
 
-        coreUpdateFilter(statePredictEnabled, ekf_time_us);
+        coreUpdateFilter(statePredictEnabled);
 
         fpVector3_t eulers;
 
         getEulerAngles(&eulers);
 
-        int16_t ekf_eulers_z = RADIANS_TO_CENTIDEGREES(eulers.z);
+        int16_t ekf_eulers_z = RADIANS_TO_DECIDEGREES(-eulers.z);
 
         if (ekf_eulers_z < 0)
         {
-            ekf_eulers_z += 36000;
+            ekf_eulers_z += 3600;
         }
 
-        debug[1] = RADIANS_TO_CENTIDEGREES(eulers.x);
-        debug[2] = RADIANS_TO_CENTIDEGREES(eulers.y);
+        debug[1] = RADIANS_TO_DECIDEGREES(eulers.x);
+        debug[2] = RADIANS_TO_DECIDEGREES(eulers.y);
         debug[3] = ekf_eulers_z;
 
         float ekf_alt;
         coreGetPosD(&ekf_alt);
-        debug[4] = RADIANS_TO_DECIDEGREES(outputDataNew.quat.q0); //-ekf_alt * 100; // convert from m in NED to cm in NEU
-        debug[5] = RADIANS_TO_DECIDEGREES(outputDataNew.quat.q1);
-        debug[6] = RADIANS_TO_DECIDEGREES(outputDataNew.quat.q2);
-        debug[7] = RADIANS_TO_DECIDEGREES(outputDataNew.quat.q3);
+        //debug[4] = -ekf_alt * 100; // convert from m in NED to cm in NEU
 
         TIME_SECTION_END(0);
     }
@@ -316,7 +322,7 @@ void setTerrainHgtStable(bool val)
 // Returns false if the filter has rejected the attempt to set the origin
 bool ekfSetOriginLLH(gpsLocation_t *loc)
 {
-    if (ekfParam._fusionModeGPS != 3 || ekfParam.common_origin_valid)
+    if (ekfParam._fusionModeGPS != 3 || ekf_common_origin_valid)
     {
         return false;
     }

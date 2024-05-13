@@ -1,9 +1,27 @@
 /*
+ * This file is part of INAV.
+ *
+ * INAV is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * INAV is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with INAV.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/*
   24 state EKF based on the derivation in https://github.com/priseborough/
   InertialNav/blob/master/derivations/RotationVectorAttitudeParameterisation/
   GenerateNavFilterEquations.m
 
   Converted from Matlab to C++ by Paul Riseborough
+  Converted from C++ to C by Julio Cesar Matias
 
   EKF Tuning parameters refactored by Tom Cauchois
 
@@ -28,11 +46,12 @@
 #include "ekf/ekfMath.h"
 #include "io/gps.h"
 
-// EKF Tuneable Parameters
+// User EKF Tuneable Parameters
 typedef struct
 {
   // User confgurable params
-  int8_t _enable;               // zero to disable EKF
+  bool _enable;                 // false to disable the EKF
+  bool _ekfCompassLearn;        // true to active the auto EKF inflight Compass calibration
   float _gpsHorizVelNoise;      // GPS horizontal velocity measurement noise : m/s
   float _gpsVertVelNoise;       // GPS vertical velocity measurement noise : m/s
   float _gpsHorizPosNoise;      // GPS horizontal position measurement noise m
@@ -78,8 +97,11 @@ typedef struct
   int16_t _mag_ef_limit;        // limit on difference between WMM tables and learned earth field.
   float _hrt_filt_freq;         // frequency of output observer height rate complementary filter in Hz
   int8_t _gsfResetMaxCount;     // maximum number of times the EKF is allowed to reset it's yaw to the EKF-GSF estimate
+} ekfParam_t;
 
-  // Developer configurable params
+// Developer configurable params
+typedef struct
+{
   float gpsNEVelVarAccScale;      // Scale factor applied to NE velocity measurement variance due to manoeuvre acceleration
   float gpsDVelVarAccScale;       // Scale factor applied to vertical velocity measurement variance due to manoeuvre acceleration
   float gpsPosVarAccScale;        // Scale factor applied to horizontal position measurement variance due to manoeuvre acceleration
@@ -93,25 +115,18 @@ typedef struct
   uint16_t tasRetryTime_ms;       // True airspeed timeout and retry interval (msec)
   uint16_t magFailTimeLimit_ms;   // number of msec before a magnetometer failing innovation consistency checks is declared failed (msec)
   float magVarRateScale;          // scale factor applied to magnetometer variance due to angular rate
-  float gyroBiasNoiseScaler;      // scale factor applied to gyro bias state process noise when on ground
   uint8_t hgtAvg_ms;              // average number of msec between height measurements
   uint8_t betaAvg_ms;             // average number of msec between synthetic sideslip measurements
-  float covTimeStepMax;           // maximum time (sec) between covariance prediction updates
-  float covDelAngMax;             // maximum delta angle between covariance prediction updates
   float DCM33FlowMin;             // If Tbn(3,3) is less than this number, optical flow measurements will not be fused as tilt is too high.
-  float fScaleFactorPnoise;       // Process noise added to focal length scale factor state variance at each time step
   uint8_t flowTimeDeltaAvg_ms;    // average interval between optical flow measurements (msec)
-  uint8_t flowIntervalMax_ms;     // maximum allowable time between flow fusion events
   float gndEffectBaroScaler;      // scaler applied to the barometer observation variance when ground effect mode is active
   float maxYawEstVelInnov;        // Maximum acceptable length of the velocity innovation returned by the EKF-GSF yaw estimator (m/s)
-  uint8_t _framesPerPrediction;   // expected number of IMU frames per prediction
-  uint32_t _frameTimeUsec;        // time per IMU frame
-  uint16_t _imuTimeHz;            // IMU time in Hz
-  gpsLocation_t common_EKF_origin;
-  bool common_origin_valid;
-} ekfParam_t;
+  uint8_t framesPerPrediction;    // expected number of IMU frames per prediction
+  uint16_t imuTimeHz;             // IMU time in Hz
+} ekfInternalParam_t;
 
 extern ekfParam_t ekfParam;
+extern ekfInternalParam_t ekfInternalParam;
 
 bool ekfInitialiseFilter(void);
 void ekfUpdateFilter(void);
