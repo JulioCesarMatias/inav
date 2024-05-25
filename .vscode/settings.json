@@ -20,6 +20,7 @@
         "inttypes.h": "c",
         "navigation_private.h": "c",
         "navigation_pos_estimator_private.h": "c",
-        "ekfgsf_yaw.h": "c"
+        "ekfgsf_yaw.h": "c",
+        "ekfbuffer.h": "c"
     }
 }

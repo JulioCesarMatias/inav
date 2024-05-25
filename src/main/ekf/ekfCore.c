@@ -599,11 +599,9 @@ bool coreInitialiseFilterBootstrap(void)
     float roll;
     fpVector3_t initAccVec;
     readDeltaVelocity(&initAccVec, &dVel_dt);
-
-    // convert the accel in body frame in cm/s to m/s
-    initAccVec.x = CENTIMETERS_TO_METERS(initAccVec.x) / dVel_dt;
-    initAccVec.y = CENTIMETERS_TO_METERS(initAccVec.y) / dVel_dt;
-    initAccVec.z = CENTIMETERS_TO_METERS(initAccVec.z) / dVel_dt;
+    initAccVec.x = initAccVec.x / dVel_dt;
+    initAccVec.y = initAccVec.y / dVel_dt;
+    initAccVec.z = initAccVec.z / dVel_dt;
 
     // normalise the acceleration vector
     if (calc_length_pythagorean_3D(initAccVec.x, initAccVec.y, initAccVec.z) > 0.001f)
