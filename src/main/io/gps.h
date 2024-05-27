@@ -144,6 +144,8 @@ typedef struct gpsSolutionData_s {
 
     uint16_t hdop;  // generic HDOP value (*HDOP_SCALE)
 
+    uint32_t speed_accuracy;
+
     dateTime_t time; // GPS time in UTC
 
 } gpsSolutionData_t;

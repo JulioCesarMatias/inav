@@ -268,6 +268,10 @@ main_sources(COMMON_SRC
     drivers/vtx_common.c
     drivers/vtx_common.h
 
+    ekf/ekf.c
+    ekf/ekf.h
+    ekf/ekfMath.h
+
     fc/cli.c
     fc/cli.h
     fc/config.c

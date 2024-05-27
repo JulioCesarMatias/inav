@@ -873,7 +873,7 @@ static void applyThrottleTiltCompensation(void)
         }
     }
 }
-
+#include "ekf/ekf.h"
 void taskMainPidLoop(timeUs_t currentTimeUs)
 {
 
@@ -907,6 +907,8 @@ void taskMainPidLoop(timeUs_t currentTimeUs)
 
     imuUpdateAccelerometer();
     imuUpdateAttitude(currentTimeUs);
+
+    ekf_UpdateFilter();
 
 #if defined(SITL_BUILD)
     }

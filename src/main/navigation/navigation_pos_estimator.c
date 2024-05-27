@@ -278,17 +278,17 @@ void onNewGPSData(void)
  */
 void updatePositionEstimator_BaroTopic(timeUs_t currentTimeUs)
 {
-    float newBaroAlt = baroCalculateAltitude();
+    posEstimator.baro.rawAlt = baroCalculateAltitude();
 
     /* If we are required - keep altitude at zero */
     if (shouldResetReferenceAltitude()) {
-        initialBaroAltitudeOffset = newBaroAlt;
+        initialBaroAltitudeOffset = posEstimator.baro.rawAlt;
     }
 
     if (sensors(SENSOR_BARO) && baroIsCalibrationComplete()) {
         const timeUs_t baroDtUs = currentTimeUs - posEstimator.baro.lastUpdateTime;
 
-        posEstimator.baro.alt = newBaroAlt - initialBaroAltitudeOffset;
+        posEstimator.baro.alt = posEstimator.baro.rawAlt - initialBaroAltitudeOffset;
         posEstimator.baro.epv = positionEstimationConfig()->baro_epv;
         posEstimator.baro.lastUpdateTime = currentTimeUs;
 

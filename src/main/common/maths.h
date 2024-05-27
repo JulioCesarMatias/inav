@@ -60,9 +60,9 @@
 
 #define CENTIMETERS_TO_CENTIFEET(cm)    (cm / 0.3048f)
 #define CENTIMETERS_TO_FEET(cm)         (cm / 30.48f)
-#define CENTIMETERS_TO_METERS(cm)       (cm * 0.01f)
+#define CENTIMETERS_TO_METERS(cm)       ((cm) * 0.01f)
 
-#define METERS_TO_CENTIMETERS(m)        (m * 100)
+#define METERS_TO_CENTIMETERS(m)        ((m) * 100)
 #define METERS_TO_KILOMETERS(m)         (m / 1000.0f)
 #define METERS_TO_MILES(m)              (m / 1609.344f)
 #define METERS_TO_NAUTICALMILES(m)      (m / 1852.00f)

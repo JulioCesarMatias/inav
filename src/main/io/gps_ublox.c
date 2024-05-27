@@ -567,6 +567,7 @@ static bool gpsParseFrameUBLOX(void)
         gpsSolDRV.velNED[X] = _buffer.velned.ned_north;
         gpsSolDRV.velNED[Y] = _buffer.velned.ned_east;
         gpsSolDRV.velNED[Z] = _buffer.velned.ned_down;
+        gpsSolDRV.speed_accuracy = _buffer.velned.speed_accuracy;
         gpsSolDRV.flags.validVelNE = true;
         gpsSolDRV.flags.validVelD = true;
         _new_speed = true;
@@ -601,6 +602,7 @@ static bool gpsParseFrameUBLOX(void)
         gpsSolDRV.eph = gpsConstrainEPE(_buffer.pvt.horizontal_accuracy / 10);
         gpsSolDRV.epv = gpsConstrainEPE(_buffer.pvt.vertical_accuracy / 10);
         gpsSolDRV.hdop = gpsConstrainHDOP(_buffer.pvt.position_DOP);
+        gpsSolDRV.speed_accuracy = _buffer.pvt.speed_accuracy;
         gpsSolDRV.flags.validVelNE = true;
         gpsSolDRV.flags.validVelD = true;
         gpsSolDRV.flags.validEPE = true;
