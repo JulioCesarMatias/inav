@@ -40,9 +40,11 @@ typedef enum {
 
 typedef struct baro_s {
     baroDev_t dev;
-    int32_t BaroAlt;
-    int32_t baroTemperature;            // Use temperature for telemetry
-    int32_t baroPressure;               // Use pressure for telemetry
+    int32_t rawAlt;          // Raw barometric altitude (cm)
+    float altOffSet;         // Barometric altitude Ground OffSet (cm)
+    int32_t baroTemperature; // Use temperature for telemetry
+    int32_t baroPressure;    // Use pressure for telemetry
+    timeUs_t lastUpdateTime; // Last update time (us)
 } baro_t;
 
 extern baro_t baro;
@@ -61,8 +63,7 @@ bool baroInit(void);
 bool baroIsCalibrationComplete(void);
 void baroStartCalibration(void);
 uint32_t baroUpdate(void);
-int32_t baroCalculateAltitude(void);
-int32_t baroGetLatestAltitude(void);
+void baroCalculateAltitude(void);
 int16_t baroGetTemperature(void);
 bool baroIsHealthy(void);
 

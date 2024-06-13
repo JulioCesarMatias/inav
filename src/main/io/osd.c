@@ -511,7 +511,7 @@ static void osdFormatWindSpeedStr(char *buff, int32_t ws, bool isValid)
 /**
 * Converts altitude into a string based on the current unit system
 * prefixed by a a symbol to indicate the unit used.
-* @param alt Raw altitude/distance (i.e. as taken from baro.BaroAlt in centimeters)
+* @param alt Raw altitude/distance (i.e. as taken from baro.rawAlt in centimeters)
 */
 void osdFormatAltitudeSymbol(char *buff, int32_t alt)
 {
@@ -567,7 +567,7 @@ void osdFormatAltitudeSymbol(char *buff, int32_t alt)
 
 /**
 * Converts altitude into a string based on the current unit system.
-* @param alt Raw altitude/distance (i.e. as taken from baro.BaroAlt in centimeters)
+* @param alt Raw altitude/distance (i.e. as taken from baro.rawAlt in centimeters)
 */
 static void osdFormatAltitudeStr(char *buff, int32_t alt)
 {

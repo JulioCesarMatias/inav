@@ -286,7 +286,7 @@ void updateEstimatedGPSFix(void)
     if (sensorHasFix || !canEstimateGPSFix()) {
         estimated_lat = gpsSol.llh.lat;
         estimated_lon = gpsSol.llh.lon;
-        estimated_alt = posControl.gpsOrigin.alt + baro.BaroAlt;
+        estimated_alt = posControl.gpsOrigin.alt + baro.rawAlt;
         return;
     }
 
@@ -327,7 +327,7 @@ void updateEstimatedGPSFix(void)
 
     estimated_lat += (int32_t)( velX * dt / (DISTANCE_BETWEEN_TWO_LONGITUDE_POINTS_AT_EQUATOR * 1000 ) );
     estimated_lon += (int32_t)( velY * dt / (DISTANCE_BETWEEN_TWO_LONGITUDE_POINTS_AT_EQUATOR * 1000 * posControl.gpsOrigin.scale) );
-    estimated_alt = posControl.gpsOrigin.alt + baro.BaroAlt;
+    estimated_alt = posControl.gpsOrigin.alt + baro.rawAlt;
 
     gpsSol.llh.lat = estimated_lat;
     gpsSol.llh.lon = estimated_lon;

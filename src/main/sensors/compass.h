@@ -50,7 +50,7 @@ typedef enum {
 typedef struct mag_s {
     magDev_t dev;
     float magADC[XYZ_AXIS_COUNT];
-    timeMs_t lastUpdate_ms;
+    timeUs_t lastUpdateTime;
 } mag_t;
 
 extern mag_t mag;

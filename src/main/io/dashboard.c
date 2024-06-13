@@ -409,8 +409,7 @@ static void showStatusPage(void)
 
 #ifdef USE_BARO
     if (sensors(SENSOR_BARO)) {
-        int32_t alt = baroCalculateAltitude();
-        tfp_sprintf(lineBuffer, "Alt: %d", (int)(alt / 100));
+        tfp_sprintf(lineBuffer, "Alt: %d", (int)(baro.rawAlt / 100));
         padHalfLineBuffer();
         i2c_OLED_set_xy(HALF_SCREEN_CHARACTER_COLUMN_COUNT, rowIndex);
         i2c_OLED_send_string(lineBuffer);

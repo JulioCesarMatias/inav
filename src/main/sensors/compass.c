@@ -484,7 +484,7 @@ void compassUpdate(timeUs_t currentTimeUs)
     }
 
     magUpdatedAtLeastOnce = true;
-    mag.lastUpdate_ms = US2MS(currentTimeUs);
+    mag.lastUpdateTime = currentTimeUs;
 }
 
 #endif

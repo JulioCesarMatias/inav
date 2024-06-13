@@ -309,7 +309,7 @@ void baroStartCalibration(void)
     zeroCalibrationStartS(&zeroCalibration, CALIBRATING_BARO_TIME_MS, acceptedPressureVariance, false);
 }
 
-int32_t baroCalculateAltitude(void)
+void baroCalculateAltitude(void)
 {
     if (!baroIsCalibrationComplete()) {
         zeroCalibrationAddValueS(&zeroCalibration, baro.baroPressure);
@@ -320,19 +320,12 @@ int32_t baroCalculateAltitude(void)
             LOG_DEBUG(BARO, "Barometer calibration complete (%d)", (int)lrintf(baroGroundAltitude));
         }
 
-        baro.BaroAlt = 0;
+        baro.rawAlt = 0;
     }
     else {
         // calculates height from ground via baro readings
-        baro.BaroAlt = pressureToAltitude(baro.baroPressure) - baroGroundAltitude;
+        baro.rawAlt = pressureToAltitude(baro.baroPressure) - baroGroundAltitude;
    }
-
-    return baro.BaroAlt;
-}
-
-int32_t baroGetLatestAltitude(void)
-{
-    return baro.BaroAlt;
 }
 
 int16_t baroGetTemperature(void)

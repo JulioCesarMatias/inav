@@ -154,12 +154,74 @@ static inline void quaternionFromEuler(fpQuaternion_t *q, float roll, float pitc
   q->q3 = cr2 * cp2 * sy2 - sr2 * sp2 * cy2;
 }
 
+// make this quaternion equivalent to the supplied matrix
+// Thanks to Martin John Baker
+// http://www.euclideanspace.com/maths/geometry/rotations/conversions/matrixToQuaternion/index.htm
+static inline fpQuaternion_t quaternion_from_rotation_matrix(fpMat3_t m)
+{
+    const float m00 = m.m[0][0];
+    const float m11 = m.m[1][1];
+    const float m22 = m.m[2][2];
+    const float m10 = m.m[1][0];
+    const float m01 = m.m[0][1];
+    const float m20 = m.m[2][0];
+    const float m02 = m.m[0][2];
+    const float m21 = m.m[2][1];
+    const float m12 = m.m[1][2];
+    fpQuaternion_t q;
+
+    const float tr = m00 + m11 + m22;
+
+    if (tr > 0)
+    {
+        const float S = sqrtf(tr + 1) * 2;
+        q.q0 = 0.25f * S;
+        q.q1 = (m21 - m12) / S;
+        q.q2 = (m02 - m20) / S;
+        q.q3 = (m10 - m01) / S;
+    }
+    else if ((m00 > m11) && (m00 > m22))
+    {
+        const float S = sqrtf(1.0f + m00 - m11 - m22) * 2.0f;
+        q.q0 = (m21 - m12) / S;
+        q.q1 = 0.25f * S;
+        q.q2 = (m01 + m10) / S;
+        q.q3 = (m02 + m20) / S;
+    }
+    else if (m11 > m22)
+    {
+        const float S = sqrtf(1.0f + m11 - m00 - m22) * 2.0f;
+        q.q0 = (m02 - m20) / S;
+        q.q1 = (m01 + m10) / S;
+        q.q2 = 0.25f * S;
+        q.q3 = (m12 + m21) / S;
+    }
+    else
+    {
+        const float S = sqrtf(1.0f + m22 - m00 - m11) * 2.0f;
+        q.q0 = (m10 - m01) / S;
+        q.q1 = (m02 + m20) / S;
+        q.q2 = (m12 + m21) / S;
+        q.q3 = 0.25f * S;
+    }
+
+    return q;
+}
+
 // create eulers from a quaternion
 static inline void quaternionToEuler(fpQuaternion_t q, float *roll, float *pitch, float *yaw)
 {
   *roll = atan2f(2.0f * (q.q0 * q.q1 + q.q2 * q.q3), 1.0f - 2.0f * (q.q1 * q.q1 + q.q2 * q.q2));
   *pitch = asinf(2.0f * (q.q0 * q.q2 - q.q3 * q.q1));
   *yaw = atan2f(2.0f * (q.q0 * q.q3 + q.q1 * q.q2), 1.0f - 2.0f * (q.q2 * q.q2 + q.q3 * q.q3));
+}
+
+// return the reverse rotation of this quaternion
+static inline fpQuaternion_t quaternion_inverse(fpQuaternion_t q)
+{
+  const fpQuaternion_t qRet = {q.q0, -q.q1, -q.q2, -q.q3};
+
+  return qRet;
 }
 
 // matrix multiplication by a vector

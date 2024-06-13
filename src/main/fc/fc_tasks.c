@@ -201,6 +201,8 @@ void taskUpdateBaro(timeUs_t currentTimeUs)
         return;
     }
 
+    baro.lastUpdateTime = currentTimeUs;
+
     const uint32_t newDeadline = baroUpdate();
     if (newDeadline != 0) {
         rescheduleTask(TASK_SELF, newDeadline);

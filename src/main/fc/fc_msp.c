@@ -628,7 +628,7 @@ static bool mspFcProcessOutCommand(uint16_t cmdMSP, sbuf_t *dst, mspPostProcessF
         sbufWriteU32(dst, lrintf(getEstimatedActualPosition(Z)));
         sbufWriteU16(dst, lrintf(getEstimatedActualVelocity(Z)));
 #if defined(USE_BARO)
-        sbufWriteU32(dst, baroGetLatestAltitude());
+        sbufWriteU32(dst, baro.rawAlt);
 #else
         sbufWriteU32(dst, 0);
 #endif

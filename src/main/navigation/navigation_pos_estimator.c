@@ -54,7 +54,6 @@
 #include "sensors/opflow.h"
 
 navigationPosEstimator_t posEstimator;
-static float initialBaroAltitudeOffset = 0.0f;
 
 PG_REGISTER_WITH_RESET_TEMPLATE(positionEstimationConfig_t, positionEstimationConfig, PG_POSITION_ESTIMATION_CONFIG, 7);
 
@@ -120,10 +119,10 @@ static bool shouldResetReferenceAltitude(void)
 
     if (ARMING_FLAG(ARMED) && emergRearmResetCheck) {
         if (STATE(IN_FLIGHT_EMERG_REARM)) {
-            initialBaroAltitudeOffset = backupInitialBaroAltitudeOffset;
+            baro.altOffSet = backupInitialBaroAltitudeOffset;
             posControl.gpsOrigin.alt = backupGpsOriginAltitude;
         } else {
-            backupInitialBaroAltitudeOffset = initialBaroAltitudeOffset;
+            backupInitialBaroAltitudeOffset = baro.altOffSet;
             backupGpsOriginAltitude = posControl.gpsOrigin.alt;
         }
     }
@@ -278,17 +277,17 @@ void onNewGPSData(void)
  */
 void updatePositionEstimator_BaroTopic(timeUs_t currentTimeUs)
 {
-    posEstimator.baro.rawAlt = baroCalculateAltitude();
+    baroCalculateAltitude();
 
     /* If we are required - keep altitude at zero */
     if (shouldResetReferenceAltitude()) {
-        initialBaroAltitudeOffset = posEstimator.baro.rawAlt;
+        baro.altOffSet = (float)baro.rawAlt;
     }
 
     if (sensors(SENSOR_BARO) && baroIsCalibrationComplete()) {
         const timeUs_t baroDtUs = currentTimeUs - posEstimator.baro.lastUpdateTime;
 
-        posEstimator.baro.alt = posEstimator.baro.rawAlt - initialBaroAltitudeOffset;
+        posEstimator.baro.alt = (float)baro.rawAlt - baro.altOffSet;
         posEstimator.baro.epv = positionEstimationConfig()->baro_epv;
         posEstimator.baro.lastUpdateTime = currentTimeUs;
 

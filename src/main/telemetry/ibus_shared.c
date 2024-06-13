@@ -192,10 +192,10 @@ static uint8_t dispatchMeasurementRequest(ibusAddress_t address) {
         if (sensors(SENSOR_BARO)) return sendIbusMeasurement2(address, (int16_t) (baro.baroPressure / 10)); //int32_t
         else return sendIbusMeasurement2(address, 0);
     } else if (SENSOR_ADDRESS_TYPE_LOOKUP[address].value == IBUS_MEAS_VALUE_ALT) { //BARO_ALT in cm => m
-        if (sensors(SENSOR_BARO)) return sendIbusMeasurement2(address, (uint16_t) baro.BaroAlt); //int32_t
+        if (sensors(SENSOR_BARO)) return sendIbusMeasurement2(address, (uint16_t) baro.rawAlt); //int32_t
         else return sendIbusMeasurement2(address, 0);
     } else if (SENSOR_ADDRESS_TYPE_LOOKUP[address].value == IBUS_MEAS_VALUE_ALT4) { //BARO_ALT //In cm => m
-        if (sensors(SENSOR_BARO)) return sendIbusMeasurement4(address, (int32_t) baro.BaroAlt); //int32_t
+        if (sensors(SENSOR_BARO)) return sendIbusMeasurement4(address, (int32_t) baro.rawAlt); //int32_t
         else return sendIbusMeasurement4(address, 0);
     } else if (SENSOR_ADDRESS_TYPE_LOOKUP[address].value == IBUS_MEAS_VALUE_STATUS) { //STATUS sat num AS #0, FIX AS 0, HDOP AS 0, Mode AS 0
         uint16_t status = flightModeToIBusTelemetryMode1[getFlightModeForTelemetry()];

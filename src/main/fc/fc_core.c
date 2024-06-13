@@ -37,6 +37,8 @@
 #include "drivers/system.h"
 #include "drivers/pwm_output.h"
 
+#include "ekf/ekf.h"
+
 #include "sensors/sensors.h"
 #include "sensors/diagnostics.h"
 #include "sensors/boardalignment.h"
@@ -873,7 +875,7 @@ static void applyThrottleTiltCompensation(void)
         }
     }
 }
-#include "ekf/ekf.h"
+
 void taskMainPidLoop(timeUs_t currentTimeUs)
 {
 
@@ -906,9 +908,12 @@ void taskMainPidLoop(timeUs_t currentTimeUs)
     gyroFilter();
 
     imuUpdateAccelerometer();
-    imuUpdateAttitude(currentTimeUs);
 
-    ekf_UpdateFilter();
+    //if (ekf_isEnabled()) {
+        //ekf_UpdateFilter();
+    //} else {
+        imuUpdateAttitude(currentTimeUs);
+    //}
 
 #if defined(SITL_BUILD)
     }
