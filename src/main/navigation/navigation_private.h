@@ -531,8 +531,6 @@ float getDesiredClimbRate(float targetAltitude, timeDelta_t deltaMicros);
 
 bool checkForPositionSensorTimeout(void);
 
-bool isGPSGlitchDetected(void);
-
 /* Multicopter-specific functions */
 void setupMulticopterAltitudeController(void);
 
@@ -540,6 +538,9 @@ void resetMulticopterAltitudeController(void);
 void resetMulticopterPositionController(void);
 void resetMulticopterHeadingController(void);
 void resetMulticopterBrakingMode(void);
+
+void startMulticopterWPNavigation(const fpVector3_t dest_loc, const fpVector3_t next_dest_loc);
+bool isMulticopterWPReached(void);
 
 bool adjustMulticopterAltitudeFromRCInput(void);
 bool adjustMulticopterHeadingFromRCInput(void);

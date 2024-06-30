@@ -50,7 +50,10 @@
 
 #include "navigation/navigation.h"
 #include "navigation/navigation_private.h"
+#include "navigation/scurve.h"
 #include "navigation/sqrt_controller.h"
+
+#include "scheduler/scheduler.h"
 
 #include "sensors/battery.h"
 
@@ -70,7 +73,8 @@ float getSqrtControllerVelocity(float targetAltitude, timeDelta_t deltaMicros)
             &alt_hold_sqrt_controller,
             targetAltitude,
             navGetCurrentActualPositionAndVelocity()->pos.z,
-            US2S(deltaMicros)
+            US2S(deltaMicros),
+            SQRT_CONTROLLER_POS_Z
     );
 }
 
@@ -227,7 +231,8 @@ void resetMulticopterAltitudeController(void)
         posControl.pids.pos[Z].param.kP,
         -fabsf(nav_speed_down),
         nav_speed_up,
-        nav_accel_z
+        nav_accel_z,
+        SQRT_CONTROLLER_POS_Z
     );
 }
 
@@ -385,16 +390,6 @@ static void processMulticopterBrakingMode(const bool isAdjusting)
 #else
     UNUSED(isAdjusting);
 #endif
-}
-
-void resetMulticopterPositionController(void)
-{
-    for (int axis = 0; axis < 2; axis++) {
-        navPidReset(&posControl.pids.vel[axis]);
-        posControl.rcAdjustment[axis] = 0;
-        lastAccelTargetX = 0.0f;
-        lastAccelTargetY = 0.0f;
-    }
 }
 
 static bool adjustMulticopterCruiseSpeed(int16_t rcPitchAdjustment)
@@ -559,6 +554,1692 @@ static float computeVelocityScale(
     return constrainf(scale, 0, attenuationFactor);
 }
 
+typedef enum {
+    POSHOLD_PILOT_OVERRIDE = 0,          // pilot is controlling this axis (i.e. roll or pitch)
+    POSHOLD_BRAKE,                       // this axis is braking towards zero
+    POSHOLD_BRAKE_READY_TO_LOITER,       // this axis has completed braking and is ready to enter loiter mode (both modes must be this value before moving to next stage)
+    POSHOLD_BRAKE_TO_LOITER,             // both vehicle's axis (roll and pitch) are transitioning from braking to loiter mode (braking and loiter controls are mixed)
+    POSHOLD_LOITER,                      // both vehicle axis are holding position
+    POSHOLD_CONTROLLER_TO_PILOT_OVERRIDE // pilot has input controls on this axis and this axis is transitioning to pilot override (other axis will transition to brake if no pilot input)
+} poshold_rp_mode;
+
+typedef struct {
+    poshold_rp_mode roll_mode           : 3;    // roll mode: pilot override, brake or loiter
+    poshold_rp_mode pitch_mode          : 3;    // pitch mode: pilot override, brake or loiter
+    uint8_t braking_time_updated_roll   : 1;    // true once we have re-estimated the braking time.  This is done once as the vehicle begins to flatten out after braking
+    uint8_t braking_time_updated_pitch  : 1;    // true once we have re-estimated the braking time.  This is done once as the vehicle begins to flatten out after braking
+
+    // braking related variables
+    float brake_gain;                         // gain used during conversion of vehicle's velocity to lean angle during braking (calculated from brake_rate)
+    float brake_roll;                         // target roll angle during braking periods
+    float brake_pitch;                        // target pitch angle during braking periods
+    int16_t brake_timeout_roll;               // number of cycles allowed for the braking to complete, this timeout will be updated at half-braking
+    int16_t brake_timeout_pitch;              // number of cycles allowed for the braking to complete, this timeout will be updated at half-braking
+    float brake_angle_max_roll;               // maximum lean angle achieved during braking.  Used to determine when the vehicle has begun to flatten out so that we can re-estimate the braking time
+    float brake_angle_max_pitch;              // maximum lean angle achieved during braking  Used to determine when the vehicle has begun to flatten out so that we can re-estimate the braking time
+    int16_t brake_to_loiter_timer;            // cycles to mix brake and loiter controls in POSHOLD_BRAKE_TO_LOITER
+
+    // loiter related variables
+    int16_t controller_to_pilot_timer_roll;   // cycles to mix controller and pilot controls in POSHOLD_CONTROLLER_TO_PILOT
+    int16_t controller_to_pilot_timer_pitch;  // cycles to mix controller and pilot controls in POSHOLD_CONTROLLER_TO_PILOT
+    float controller_final_roll;              // final roll angle from controller as we exit brake or loiter mode (used for mixing with pilot input)
+    float controller_final_pitch;             // final pitch angle from controller as we exit brake or loiter mode (used for mixing with pilot input)
+
+    // wind compensation related variables
+    fpVector3_t wind_comp_ef;                 // wind compensation in earth frame, filtered lean angles from position controller
+    float wind_comp_roll;                     // roll angle to compensate for wind
+    float wind_comp_pitch;                    // pitch angle to compensate for wind
+    uint16_t wind_comp_start_timer;           // counter to delay start of wind compensation for a short time after loiter is engaged
+    int8_t wind_comp_timer;                   // counter to reduce wind comp roll/pitch lean angle calcs to 10hz
+
+    uint8_t loop_rate_factor; // used to adapt Pos-Hold params to loop_rate
+
+    // pilot input related variables
+    float pilot_roll;  // pilot requested roll angle (filtered to slow returns to zero)
+    float pilot_pitch; // pilot requested roll angle (filtered to slow returns to zero)
+
+    // final output
+    float roll;   // final roll angle sent to attitude controller
+    float pitch;  // final pitch angle sent to attitude controller
+} poshold_t;
+
+poshold_t poshold;
+
+#define LOOP_RATE_FACTOR                        (poshold.loop_rate_factor)               // used to adapt Pos-Hold params to loop_rate
+#define POSHOLD_BRAKE_TIME_ESTIMATE_MAX         (600 * LOOP_RATE_FACTOR)                 // max number of cycles the brake will be applied before we switch to loiter
+#define POSHOLD_BRAKE_TO_LOITER_TIMER           (150 * LOOP_RATE_FACTOR)                 // number of cycles to transition from brake mode to loiter mode.
+#define POSHOLD_WIND_COMP_START_TIMER           (150 * LOOP_RATE_FACTOR)                 // number of cycles to start wind compensation update after loiter is engaged
+#define POSHOLD_CONTROLLER_TO_PILOT_MIX_TIMER   (50 * LOOP_RATE_FACTOR)                  // set it from 100 to 200, the number of centiseconds loiter and manual commands are mixed to make a smooth transition.
+#define POSHOLD_WIND_COMP_TIMER_10HZ            (10 * LOOP_RATE_FACTOR)                  // counter value used to reduce wind compensation to 10hz
+#define TC_WIND_COMP                            (1.0f / (float)(100 * LOOP_RATE_FACTOR)) // time constant for posHoldUpdateWindCompEstimate()
+#define POSHOLD_SMOOTH_RATE_FACTOR              (TC_WIND_COMP * 5.0f)                    // filter applied to pilot's roll/pitch input as it returns to center. A lower number will cause the roll/pitch to return to zero more slowly if the brake_rate is also low.
+#define POSHOLD_SPEED_0                         10                                       // speed below which it is always safe to switch to loiter
+#define POSHOLD_WIND_COMP_ESTIMATE_SPEED_MAX    10                                       // wind compensation estimates will only run when velocity is at or below this speed in cm/s
+#define POSHOLD_STICK_RELEASE_SMOOTH_ANGLE      180                                      // max angle required after which the smooth stick release effect is applied
+#define POSHOLD_WIND_COMP_LEAN_PCT_MAX          0.6666f                                  // wind compensation no more than 2/3rds of angle max to ensure pilot can always override
+
+sqrt_controller_t sqrt_controller_pos_xy;
+sqrt_controller_t sqrt_controller_shapping_angle;
+sqrt_controller_t sqrt_controller_loiter_brake;
+sqrt_controller_t sqrt_controller_waypoint;
+
+pt1Filter_t pid_vel_xy_error_filter[2];
+pt1Filter_t pid_vel_xy_derivative_filter[2];
+
+scurve_t scurve_prev_leg;          // previous scurve trajectory used to blend with current scurve trajectory
+scurve_t scurve_this_leg;          // current scurve trajectory
+scurve_t scurve_next_leg;          // next scurve trajectory used to blend with current scurve trajectory
+
+splineCurve_t spline_this_leg;      // spline curve for current segment
+splineCurve_t spline_next_leg;      // spline curve for next segment
+
+fpVector3_t wp_origin;              // starting point of trip to next waypoint in cm
+fpVector3_t wp_destination;         // target destination in cm
+fpVector3_t _predicted_accel;
+fpVector3_t _desired_accel;
+fpVector3_t _predicted_euler_angle;
+fpVector3_t _predicted_euler_rate;
+fpVector3_t _pos_target;  // TODO: replace with posControl.desiredState.pos.x and posControl.desiredState.pos.y in a final version
+fpVector3_t _vel_desired; // TODO: replace with posControl.desiredState.vel.x and posControl.desiredState.vel.y in a final version
+fpVector3_t _accel_desired;
+fpVector3_t _vel_target;
+fpVector3_t _accel_target;
+fpVector3_t vel_xy_error;
+fpVector3_t pid_vel_xy_integrator;
+fpVector3_t vel_xy_derivative;
+
+bool reset_pid_vel_xy_filter = true;
+bool wp_this_leg_is_spline;  // true if this leg is a spline
+bool wp_next_leg_is_spline;  // true if the next leg is a spline
+bool wp_reached_destination; // true if we have reached the destination
+bool fast_waypoint;          // true if we should ignore the waypoint radius and consider the waypoint complete once the intermediate target has reached the waypoint
+
+float _brake_accel;
+float _roll_target;     // desired roll angle in degrees calculated by position controller
+float _pitch_target;    // desired pitch angle in degrees calculated by position controller
+float pid_vel_xy_kimax = 1000.0f; // transform in a #define macro
+float wp_offset_vel;
+float wp_offset_accel;
+float wp_desired_speed_xy_cms;
+float wp_track_scalar_dt;
+float wp_scurve_snap; // scurve snap in m/s/s/s/s
+
+float wp_speed_cms = 1000.0f; // TODO: replace with navConfig()->general.auto_speed
+float wp_radius_cm = 200.0f;  // TODO: replace with navConfig()->general.waypoint_radius
+
+timeMs_t wp_last_update;
+timeMs_t brake_timer;          // system time that brake was initiated
+uint32_t last_update_xy_ticks; // ticks of last last updateXYController call
+
+// Param: ANG_LIM_TC
+// Description: Angle Limit (to maintain altitude) Time Constant
+// Range: 1 10
+uint8_t angle_limit_tc = 1;
+
+// Param: PHLD_BRAKE_RATE
+// Description: Pos-Hold braking rate. Pos-Hold flight mode's rotation rate during braking in deg/sec
+// Range: 4 12
+uint8_t poshold_brake_rate = 8;
+
+// Param: PHLD_BRAKE_ANGLE
+// Description: Pos-Hold braking angle max. Pos-Hold flight mode's max lean angle during braking in degrees
+// Range: 200 450
+uint16_t poshold_brake_angle_max = 300;
+
+// Param: attitude_INPUT_TC
+// Description: Attitude control input time constant for Pos-Hold, Loiter and Way-Point. Low numbers lead to sharper response, higher numbers to softer response. [Multirotor only]
+// Range: 0 1
+// Values: 50:Very Soft, 20:Soft, 15:Medium, 10:Crisp, 5:Very Crisp
+uint8_t input_tc = 15;
+
+// Param: LOIT_MAX_S
+// Description: Defines the maximum speed in cm/s which the aircraft will travel horizontally while in loiter mode
+// Units: cm/s
+// Range: 20 3500
+uint16_t loiter_speed_cms = 1250; // TODO: replace with navConfig()->general.max_manual_speed
+
+// Param: LOIT_MAX_A
+// Description: Maximum horizontal acceleration in cm/s/s that Pos-Hold and Loiter navigation will request.
+// Range: 100 981
+uint16_t loiter_max_accel_xy = 500;
+
+// Param: attitude_accel_r_m
+// Description: Pos-Hold, Loiter and Way-Point maximum acceleration in roll axis (degrees/second). [Multirotor only]
+// Range: 0 1800
+// Values: 0:Disabled, 300:VerySlow, 720:Slow, 1080:Medium, 1620:Fast
+uint16_t accel_roll_max = 1080;
+
+// Param: attitude_accel_p_m
+// Description: Pos-Hold, Loiter and Way-Point maximum acceleration in pitch axis (degrees/second). [Multirotor only]
+// Range: 0 1800
+// Values: 0:Disabled, 300:VerySlow, 720:Slow, 1080:Medium, 1620:Fast
+uint16_t accel_pitch_max = 1080;
+
+// Param: LOITER_BRK_ACCEL
+// Description: Loiter braking acceleration in cm/s. Higher values stop the copter more quickly when the stick is centered.
+// Range: 25 250
+uint16_t brake_accel = 250;
+
+// @Param: LOITER_BRK_DELAY
+// @Description: Loiter brake start delay (in seconds)
+// @Range: 0 2
+uint8_t brake_delay = 1;
+
+// Param: LOITER_BRK_JERK
+// Description: Loiter braking jerk in cm/s. Higher values will remove braking faster if the pilot moves the sticks during a braking maneuver.
+// Range: 500 5000
+uint16_t brake_jerk_max = 500;
+
+// Param: wp_accel_xy
+// Description: Defines the horizontal acceleration in cm/s/s used during missions. [Multirotor only]
+// Range: 50 500
+float _wp_accel_cmss = 250.0f;
+
+// @Param: wp_accel_z
+// @DisplayName: Waypoint Vertical Acceleration
+// @Description: Defines the Way-Point vertical acceleration in cm/s/s used during missions. [Multirotor only]
+// @Range: 50 500
+float _wp_accel_z_cmss = 100.0f;
+
+// Param: wp_jerk
+// Description: Defines the horizontal jerk in m/s/s used during missions
+// Range: 1 20
+float _wp_jerk = 1.0f;
+
+// @Param: wp_shap_jerk_xy
+// @Description: Way-Pont jerk limit in m/s/s/s of the horizontal kinematic path generation used to determine how quickly the UAV varies the acceleration target. [Multirotor only]
+// @Range: 1 20
+float wp_shaping_jerk_xy = 5.0f;
+
+// wrap an angle defined in radians to -PI ~ PI
+static inline float wrap_2PI(const float radian)
+{
+  float res = fmodf(radian, 2.0f * M_PIf);
+
+  if (res < 0)
+  {
+    res += (2.0f * M_PIf);
+  }
+
+  return res;
+}
+
+// wrap an angle defined in radians to -PI ~ PI
+static inline float wrap_PI(const float radian)
+{
+  float res = wrap_2PI(radian);
+
+  if (res > M_PIf)
+  {
+    res -= (2.0f * M_PIf);
+  }
+
+  return res;
+}
+
+// update the pilot's filtered lean angle with the latest raw input received
+static void posHoldUpdatePilotLeanAngle(float *lean_angle_filtered, float lean_angle_raw)
+{
+    // if raw input is large or reversing the vehicle's lean angle immediately set the fitlered angle to the new raw angle
+    if ((*lean_angle_filtered > 0 && lean_angle_raw < 0) || (*lean_angle_filtered < 0 && lean_angle_raw > 0) || (fabsf(lean_angle_raw) > POSHOLD_STICK_RELEASE_SMOOTH_ANGLE)) {
+        *lean_angle_filtered = lean_angle_raw;
+    } else {
+        // lean_angle_raw must be pulling lean_angle_filtered towards zero, smooth the decrease
+        if (*lean_angle_filtered > 0) {
+            // reduce the filtered lean angle at 5% or the brake rate (whichever is faster).
+            *lean_angle_filtered -= MAX((float)*lean_angle_filtered * POSHOLD_SMOOTH_RATE_FACTOR, MAX(1, (float)poshold_brake_rate / (float)LOOP_RATE_FACTOR));
+            // do not let the filtered angle fall below the pilot's input lean angle.
+            // the above line pulls the filtered angle down and the below line acts as a catch
+            *lean_angle_filtered = MAX(*lean_angle_filtered, lean_angle_raw);
+        } else {
+            *lean_angle_filtered += MAX(-(float)*lean_angle_filtered * POSHOLD_SMOOTH_RATE_FACTOR, MAX(1, (float)poshold_brake_rate / (float)LOOP_RATE_FACTOR));
+            *lean_angle_filtered = MIN(*lean_angle_filtered, lean_angle_raw);
+        }
+    }
+}
+
+// mixes two controls based on the mix_ratio
+// mix_ratio of 1 = use first_control completely, 0 = use second_control completely, 0.5 = mix evenly
+static float posHoldMixControls(float mix_ratio, float first_control, float second_control)
+{
+    mix_ratio = constrainf(mix_ratio, 0.0f, 1.0f);
+
+    return mix_ratio * first_control + (1.0f - mix_ratio) * second_control;
+}
+
+// updates the brake_angle based on the vehicle's velocity and brake_gain
+// brake_angle is slewed with the poshold_brake_rate and constrained by the poshold_braking_angle_max
+// velocity is assumed to be in the same direction as lean angle so for pitch you should provide the velocity backwards (i.e. -ve forward velocity)
+static void posHoldUpdateBrakeAngleFromVelocity(float *brake_angle, float velocity)
+{
+    float lean_angle;
+    float brake_rate = poshold_brake_rate;
+
+    brake_rate /= (float)LOOP_RATE_FACTOR;
+
+    if (brake_rate <= 1.0f) {
+        brake_rate = 1.0f;
+    }
+
+    // calculate velocity-only based lean angle
+    if (velocity >= 0.0f) {
+        lean_angle = -poshold.brake_gain * velocity * (1.0f + 500.0f / (velocity + 60.0f));
+    } else {
+        lean_angle = -poshold.brake_gain * velocity * (1.0f + 500.0f / (-velocity + 60.0f));
+    }
+
+    // do not let lean_angle be too far from brake_angle
+    *brake_angle = constrainf(lean_angle, *brake_angle - brake_rate, *brake_angle + brake_rate);
+
+    // constrain final brake_angle
+    *brake_angle = constrainf(*brake_angle, -(float)poshold_brake_angle_max, (float)poshold_brake_angle_max);
+}
+
+// updates wind compensation estimate
+static void posHoldUpdateWindCompEstimate(void)
+{
+    // check wind estimate start has not been delayed
+    if (poshold.wind_comp_start_timer > 0) {
+        poshold.wind_comp_start_timer--;
+        return;
+    }
+
+    // check horizontal velocity is low
+    if (calc_length_pythagorean_2D(navGetCurrentActualPositionAndVelocity()->vel.x, navGetCurrentActualPositionAndVelocity()->vel.y) > POSHOLD_WIND_COMP_ESTIMATE_SPEED_MAX) {
+        return;
+    }
+
+    // update wind compensation in earth-frame lean angles
+    if (poshold.wind_comp_ef.x == 0.0f) {
+        // if wind compensation has not been initialised set it immediately to the pos controller's desired accel in north direction
+        poshold.wind_comp_ef.x = _accel_target.x;
+    } else {
+        // low pass filter the position controller's lean angle output
+        poshold.wind_comp_ef.x = (1.0f - TC_WIND_COMP) * poshold.wind_comp_ef.x + TC_WIND_COMP * _accel_target.x;
+    }
+
+    if (poshold.wind_comp_ef.y == 0.0f) {
+        // if wind compensation has not been initialised set it immediately to the pos controller's desired accel in north direction
+        poshold.wind_comp_ef.y = _accel_target.y;
+    } else {
+        // low pass filter the position controller's lean angle output
+        poshold.wind_comp_ef.y = (1.0f - TC_WIND_COMP) * poshold.wind_comp_ef.y + TC_WIND_COMP * _accel_target.y;
+    }
+
+    // limit acceleration
+    const float accel_lim_cmss = tanf(DEGREES_TO_RADIANS(POSHOLD_WIND_COMP_LEAN_PCT_MAX * (float)navConfig()->mc.max_bank_angle)) * GRAVITY_CMSS;
+    const float wind_comp_ef_len = calc_length_pythagorean_2D(poshold.wind_comp_ef.x, poshold.wind_comp_ef.y);
+
+    if (accel_lim_cmss != 0.0f && (wind_comp_ef_len > accel_lim_cmss)) {
+        poshold.wind_comp_ef.x *= accel_lim_cmss / wind_comp_ef_len;
+        poshold.wind_comp_ef.y *= accel_lim_cmss / wind_comp_ef_len;
+    }
+}
+
+// retrieve wind compensation angles in body frame roll and pitch angles
+static void posHoldGetWindCompLeanAngles(float *roll_angle, float *pitch_angle)
+{
+    // reduce rate to 10hz
+    poshold.wind_comp_timer++;
+
+    if (poshold.wind_comp_timer < POSHOLD_WIND_COMP_TIMER_10HZ) {
+        return;
+    }
+
+    poshold.wind_comp_timer = 0;
+
+    // convert earth frame desired accelerations to body frame roll and pitch lean angles
+    *roll_angle = atanf((-poshold.wind_comp_ef.x * posControl.actualState.sinYaw + poshold.wind_comp_ef.y * posControl.actualState.cosYaw) / GRAVITY_CMSS) * (1800.0f / M_PI);
+    *pitch_angle = atanf(-(poshold.wind_comp_ef.x * posControl.actualState.cosYaw + poshold.wind_comp_ef.y * posControl.actualState.sinYaw) / GRAVITY_CMSS) * (1800.0f / M_PI);
+}
+
+// initialises transition from a controller submode (brake or loiter) to a pilot override on roll axis
+static void posHoldRollControllerToPilotOverride(void)
+{
+    poshold.roll_mode = POSHOLD_CONTROLLER_TO_PILOT_OVERRIDE;
+    poshold.controller_to_pilot_timer_roll = POSHOLD_CONTROLLER_TO_PILOT_MIX_TIMER;
+
+    // initialise pilot_roll to 0, wind_comp will be updated to compensate and posHoldUpdatePilotLeanAngle function shall not smooth this transition at next iteration. so 0 is the right value
+    poshold.pilot_roll = 0.0f;
+
+    // store final controller output for mixing with pilot input
+    poshold.controller_final_roll = poshold.roll;
+}
+
+// initialises transition from a controller submode (brake or loiter) to a pilot override on roll axis
+static void posHoldPitchControllerToPilotOverride(void)
+{
+    poshold.pitch_mode = POSHOLD_CONTROLLER_TO_PILOT_OVERRIDE;
+    poshold.controller_to_pilot_timer_pitch = POSHOLD_CONTROLLER_TO_PILOT_MIX_TIMER;
+    
+    // initialise pilot_pitch to 0, wind_comp will be updated to compensate and posHoldUpdatePilotLeanAngle function shall not smooth this transition at next iteration. so 0 is the right value
+    poshold.pilot_pitch = 0.0f;
+
+    // store final loiter outputs for mixing with pilot input
+    poshold.controller_final_pitch = poshold.pitch;
+}
+
+// Return tilt angle limit for pilot input that prioritises altitude hold over lean angle
+static float getAltHoldLeanAngleMax(float dt)
+{
+    // calc maximum tilt angle based on throttle
+    const float thr_max = (float)(getMaxThrottle() - 1000) / 1000.0f;
+    
+    // filtered Alt-Hold lean angle max - used to limit lean angle when throttle is saturated using Alt-Hold
+    static float althold_lean_angle_max;
+
+    // divide by zero check
+    if (thr_max == 0.0f) {
+        althold_lean_angle_max = 0.0f;
+        return 0.0f;
+    }
+
+    #define AC_ATTITUDE_CONTROL_ANGLE_LIMIT_THROTTLE_MAX 0.8f
+
+    const float throttle_corrected = constrainf((float)rcCommand[THROTTLE], 1000, 1999);
+
+    const float throttle_in = (throttle_corrected - 1000.0f) / 1000.0f;
+
+    const float _althold_lean_angle_max = acos(constrainf(throttle_in / (AC_ATTITUDE_CONTROL_ANGLE_LIMIT_THROTTLE_MAX * thr_max), 0.0f, 1.0f));
+    althold_lean_angle_max = althold_lean_angle_max + (dt / (dt + ((float)angle_limit_tc))) * (_althold_lean_angle_max - althold_lean_angle_max);
+
+    return RADIANS_TO_DEGREES(althold_lean_angle_max);
+}
+
+// convert roll, pitch lean target angles to lat/lon frame accelerations in cm/s/s
+static fpVector3_t leanAnglesToAccel(const fpVector3_t att_target_euler)
+{
+    // rotate our roll, pitch angles into lat/lon frame
+    const float sin_roll = sinf(att_target_euler.x);
+    const float cos_roll = cosf(att_target_euler.x);
+    const float sin_pitch = sinf(att_target_euler.y);
+    const float cos_pitch = cosf(att_target_euler.y);
+    const float sin_yaw = sinf(att_target_euler.z);
+    const float cos_yaw = cosf(att_target_euler.z);
+
+    fpVector3_t v_ret = { .v = { GRAVITY_CMSS * (-cos_yaw * sin_pitch * cos_roll - sin_yaw * sin_roll) / MAX(cos_roll * cos_pitch, 0.1f),
+                                 GRAVITY_CMSS * (-sin_yaw * sin_pitch * cos_roll + cos_yaw * sin_roll) / MAX(cos_roll * cos_pitch, 0.1f),
+                                 0.0f
+    }};
+
+    return v_ret;
+}
+
+// calculates the velocity correction from an angle error. The angular velocity has acceleration and
+// deceleration limits including basic jerk limiting using input_tc
+static float inputShapingAngle(float error_angle, float _input_tc, float accel_max, float target_ang_vel, float dt)
+{
+    // Calculate the velocity as error approaches zero with acceleration limited by accel_max
+    sqrt_controller_shapping_angle.kp = 1.0f / MAX(_input_tc, 0.01f);
+    sqrt_controller_shapping_angle.derivative_max = accel_max;
+    const float desired_ang_vel = sqrtControllerApply(&sqrt_controller_shapping_angle, error_angle, 0.0f, dt, SQRT_CONTROLLER_POS_XY);
+
+    // Acceleration is limited directly to smooth the beginning of the curve.
+    if (accel_max > 0.0f) {
+        float delta_ang_vel = accel_max * dt;
+        return constrainf(desired_ang_vel, target_ang_vel - delta_ang_vel, target_ang_vel + delta_ang_vel);
+    }
+
+    return desired_ang_vel;
+}
+
+static void setPilotDesiredAcceleration(float euler_roll_angle_dd, float euler_pitch_angle_dd, float dt)
+{
+    // Convert from centidegrees on public interface to radians
+    const float euler_roll_angle = DECIDEGREES_TO_RADIANS(euler_roll_angle_dd);
+    const float euler_pitch_angle = DECIDEGREES_TO_RADIANS(euler_pitch_angle_dd);
+
+    // convert our desired attitude to an acceleration vector assuming we are not accelerating vertically
+    const fpVector3_t desired_euler = { .v = { euler_roll_angle, euler_pitch_angle, DECIDEGREES_TO_RADIANS(attitude.values.yaw) }};
+    const fpVector3_t desired_accel = leanAnglesToAccel(desired_euler);
+
+    _desired_accel.x = desired_accel.x;
+    _desired_accel.y = desired_accel.y;
+
+    // difference between where we think we should be and where we want to be
+    fpVector3_t angle_error = { .v = { wrap_PI(euler_roll_angle - _predicted_euler_angle.x), wrap_PI(euler_pitch_angle - _predicted_euler_angle.y), 0.0f }};
+
+    // calculate the angular velocity that we would expect given our desired and predicted attitude
+    _predicted_euler_rate.x = inputShapingAngle(wrap_PI(angle_error.x), ((float)input_tc / 100.0f), DEGREES_TO_RADIANS((float)accel_roll_max), _predicted_euler_rate.x, dt);
+    _predicted_euler_rate.y = inputShapingAngle(wrap_PI(angle_error.y), ((float)input_tc / 100.0f), DEGREES_TO_RADIANS((float)accel_pitch_max), _predicted_euler_rate.y, dt);
+
+    // update our predicted attitude based on our predicted angular velocity
+    _predicted_euler_angle.x += _predicted_euler_rate.x * dt;
+    _predicted_euler_angle.y += _predicted_euler_rate.y * dt;
+
+    // convert our predicted attitude to an acceleration vector assuming we are not accelerating vertically
+    const fpVector3_t predicted_euler = { .v = { _predicted_euler_angle.x, _predicted_euler_angle.y, DECIDEGREES_TO_RADIANS(attitude.values.yaw)}};
+    const fpVector3_t predicted_accel = leanAnglesToAccel(predicted_euler);
+
+    _predicted_accel.x = predicted_accel.x;
+    _predicted_accel.y = predicted_accel.y;
+}
+
+// get maximum lean angle when using loiter
+static float getLoiterAngleMax(void)
+{
+    return navConfig()->mc.max_bank_angle * (2.0f / 3.0f);
+}
+
+static void updateLoiterDesiredVelocity(float dt)
+{
+    // calculate a loiter speed limit which is the minimum of the value set by the max_manual_speed parameter
+    const float gnd_speed_limit_cms = MAX(loiter_speed_cms, 20.0f);
+
+    const float pilot_acceleration_max = GRAVITY_CMSS * tanf(DEGREES_TO_RADIANS(getLoiterAngleMax()));
+
+    // get loiters desired velocity from the position controller where it is being stored.
+    fpVector3_t desired_vel = { .v = { posControl.desiredState.vel.x, posControl.desiredState.vel.y, 0.0f }};
+
+    // update the desired velocity using our predicted acceleration
+    desired_vel.x += _predicted_accel.x * dt;
+    desired_vel.y += _predicted_accel.y * dt;
+
+    fpVector3_t loiter_accel_brake;
+
+    float desired_speed = calc_length_pythagorean_2D(desired_vel.x, desired_vel.y);
+
+    if (desired_speed != 0.0f) {
+        fpVector3_t desired_vel_norm = { .v = { desired_vel.x / desired_speed, desired_vel.y / desired_speed, 0.0f }};
+
+        // calculate a drag acceleration based on the desired speed.
+        const float drag_decel = pilot_acceleration_max * desired_speed / gnd_speed_limit_cms;
+
+        // calculate a braking acceleration if sticks are at zero
+        float loiter_brake_accel = 0.0f;
+
+        if (_desired_accel.x == 0.0f && _desired_accel.y == 0.0f) {
+            if ((millis() - brake_timer) > S2MS(brake_delay)) {
+                float brake_gain = ((posControl.pids.vel[X].param.kP + posControl.pids.vel[Y].param.kP) / 2.0f) * 0.5f;
+                sqrt_controller_loiter_brake.kp = brake_gain;
+                sqrt_controller_loiter_brake.derivative_max = (float)brake_jerk_max;
+                loiter_brake_accel = constrainf(sqrtControllerApply(&sqrt_controller_loiter_brake, desired_speed, 0.0f, dt, SQRT_CONTROLLER_POS_XY), 0.0f, (float)brake_accel);
+            }
+        } else {
+            loiter_brake_accel = 0.0f;
+            brake_timer = millis();
+        }
+
+        _brake_accel += constrainf(loiter_brake_accel - _brake_accel, -((float)brake_jerk_max) * dt, (float)brake_jerk_max * dt);
+        loiter_accel_brake.x = desired_vel_norm.x * _brake_accel;
+        loiter_accel_brake.y = desired_vel_norm.y * _brake_accel;
+
+        // update the desired velocity using the drag and braking accelerations
+        desired_speed = MAX(desired_speed - (drag_decel + _brake_accel) * dt, 0.0f);
+        desired_vel.x = desired_vel_norm.x * desired_speed;
+        desired_vel.y = desired_vel_norm.y * desired_speed;
+    }
+
+    // add braking to the desired acceleration
+    _desired_accel.x -= loiter_accel_brake.x;
+    _desired_accel.y -= loiter_accel_brake.y;
+
+    // Apply limit to desired velocity
+    const float horizSpdDem = calc_length_pythagorean_2D(desired_vel.x, desired_vel.y);
+    if (horizSpdDem > gnd_speed_limit_cms) {
+        desired_vel.x = desired_vel.x * gnd_speed_limit_cms / horizSpdDem;
+        desired_vel.y = desired_vel.y * gnd_speed_limit_cms / horizSpdDem;
+    }
+
+    // get loiters desired velocity from the position controller where it is being stored.
+    fpVector3_t target_pos = _pos_target;
+
+    // update the target position using our predicted velocity
+    target_pos.x += (desired_vel.x * dt);
+    target_pos.y += (desired_vel.y * dt);
+
+    // send adjusted feed forward acceleration and velocity back to the Position Controller
+    _pos_target.x = target_pos.x;
+    _pos_target.y = target_pos.y;
+    _vel_desired.x = desired_vel.x;
+    _vel_desired.y = desired_vel.y;
+   _accel_desired.x = _desired_accel.x;
+   _accel_desired.y = _desired_accel.y;
+
+    debug[6] = _vel_desired.x;
+    debug[7] = _vel_desired.y;
+}
+
+/* limitAccelXY limits the acceleration to prioritise acceleration perpendicular to the provided velocity vector.
+ Input parameters are:
+    vel is the velocity vector used to define the direction acceleration limit is biased in.
+    accel is the acceleration vector to be limited.
+    accel_max is the maximum length of the acceleration vector after being limited.
+ Returns true when accel vector has been limited.
+*/
+static void limitAccelXY(const fpVector3_t vel, fpVector3_t *accel, float accel_max)
+{
+    // check accel_max is defined
+    if (accel_max <= 0.0f) {
+        return;
+    }
+
+    // limit acceleration to accel_max while prioritizing cross track acceleration
+    if ((sq(accel->x) + sq(accel->y)) > sq(accel_max)) {
+        if (vel.x == 0.0f && vel.y == 0.0f) {
+            // We do not have a direction of travel so do a simple vector length limit
+            const float len = calc_length_pythagorean_2D(accel->x, accel->y);
+            if ((len > accel_max) && len > 0.0f) {
+                accel->x *= (accel_max / len);
+                accel->y *= (accel_max / len);
+            }
+        } else {
+            // calculate acceleration in the direction of and perpendicular to the velocity input
+            const float vel_len = calc_length_pythagorean_2D(vel.x, vel.y);
+            const fpVector3_t vel_input_unit = { .v = { vel.x / vel_len, vel.y / vel_len, 0.0f }};
+
+            // acceleration in the direction of travel
+            float accel_dir = vel_input_unit.x * accel->x + vel_input_unit.y * accel->y;
+
+            // cross track acceleration
+            fpVector3_t accel_cross = { .v = { accel->x - (vel_input_unit.x * accel_dir), accel->y - (vel_input_unit.x * accel_dir), 0.0f }};
+
+            const float len = calc_length_pythagorean_2D(accel_cross.x, accel_cross.y);
+            if ((len > accel_max) && len > 0.0f) {
+                accel_cross.x *= (accel_max / len);
+                accel_cross.y *= (accel_max / len);
+                accel_dir = 0.0f;
+            } else {
+                float accel_max_dir = fast_fsqrtf(sq(accel_max) - (sq(accel_cross.x) + sq(accel_cross.y)));
+                accel_dir = constrainf(accel_dir, -accel_max_dir, accel_max_dir);
+            }
+
+            accel->x = accel_cross.x + vel_input_unit.x * accel_dir;
+            accel->y = accel_cross.y + vel_input_unit.y * accel_dir;
+        }
+    }
+}
+
+// returns true if the xy position controller has been run in the previous loop times
+static bool isActiveXY(void)
+{
+    const uint32_t dt_ticks = getSchedulerTicks32() - last_update_xy_ticks;
+
+    return dt_ticks <= 1;
+}
+
+// initialise the position controller to the current position, velocity, acceleration and attitude.
+// This function is the default initialisation for any position control that provides position, velocity and acceleration.
+static void initXYController(float dt)
+{
+    _pos_target.x = navGetCurrentActualPositionAndVelocity()->pos.x;
+    _pos_target.y = navGetCurrentActualPositionAndVelocity()->pos.y;
+    _vel_desired.x = navGetCurrentActualPositionAndVelocity()->vel.x;
+    _vel_desired.y = navGetCurrentActualPositionAndVelocity()->vel.y;
+    _vel_target.x = navGetCurrentActualPositionAndVelocity()->vel.x;
+    _vel_target.y = navGetCurrentActualPositionAndVelocity()->vel.y;
+
+    // Set desired accel to zero
+    _accel_desired.x = 0.0f;
+    _accel_desired.y = 0.0f;
+
+    if (!isActiveXY()) {
+        const fpVector3_t predicted_euler = { .v = { DECIDEGREES_TO_RADIANS(attitude.values.roll), DECIDEGREES_TO_RADIANS(attitude.values.pitch), 0.0f }};
+        const fpVector3_t predicted_accel_target = leanAnglesToAccel(predicted_euler);
+        _accel_target.x = predicted_accel_target.x;
+        _accel_target.y = predicted_accel_target.y;
+    }
+
+    // limit acceleration using maximum lean angles
+    float angle_max = MIN((getAltHoldLeanAngleMax(dt)), navConfig()->mc.max_bank_angle);
+    float accel_max = GRAVITY_CMSS * tanf(DEGREES_TO_RADIANS(angle_max));
+    
+    const float accel_len = calc_length_pythagorean_2D(_accel_target.x, _accel_target.y);
+    if ((accel_len > accel_max) && accel_len > 0.0f) {
+        _accel_target.x *= (accel_max / accel_len);
+        _accel_target.y *= (accel_max / accel_len);
+    }
+
+    // initialise I terms from lean angles
+    reset_pid_vel_xy_filter = true;
+
+    // initialise the I term to _accel_target
+    pid_vel_xy_integrator.x = _accel_target.x;
+    pid_vel_xy_integrator.y = _accel_target.y;
+    const float len = calc_length_pythagorean_2D(pid_vel_xy_integrator.x, pid_vel_xy_integrator.y);
+    if ((len > pid_vel_xy_kimax) && len > 0.0f) {
+        pid_vel_xy_integrator.x *= (pid_vel_xy_kimax / len);
+        pid_vel_xy_integrator.y *= (pid_vel_xy_kimax / len);
+    }
+
+    // initialise xy_controller time out
+    last_update_xy_ticks = getSchedulerTicks32();
+}
+
+static void getStoppingPointXY(fpVector3_t *stopping_point)
+{
+    stopping_point->x = navGetCurrentActualPositionAndVelocity()->pos.x;
+    stopping_point->y = navGetCurrentActualPositionAndVelocity()->pos.y;
+
+    const fpVector3_t curr_vel = navGetCurrentActualPositionAndVelocity()->vel;
+
+    // calculate current velocity
+    const float vel_total = calc_length_pythagorean_2D(curr_vel.x, curr_vel.y);
+
+    if (vel_total <= 0.0f) {
+        return;
+    }
+    
+    const float kP = (posControl.pids.pos[X].param.kP + posControl.pids.pos[Y].param.kP) / 2.0f;
+    const float max_speed_xy = (navGetCurrentStateFlags() & NAV_AUTO_RTH) || (navGetCurrentStateFlags() & NAV_AUTO_WP) ? wp_desired_speed_xy_cms : loiter_speed_cms;
+    const float max_accel_xy = (navGetCurrentStateFlags() & NAV_AUTO_RTH) || (navGetCurrentStateFlags() & NAV_AUTO_WP) ? _wp_accel_cmss : loiter_max_accel_xy;
+
+    const float stopping_dist = sqrtControllerInverse(kP, max_accel_xy, constrainf(vel_total, 0.0f, max_speed_xy));
+
+    if (stopping_dist <= 0.0f) {
+        return;
+    }
+
+    // convert the stopping distance into a stopping point using velocity vector
+    const float t = stopping_dist / vel_total;
+    stopping_point->x += (curr_vel.x * t);
+    stopping_point->y += (curr_vel.y * t);
+}
+
+// initialise the position controller to the stopping point with zero velocity and acceleration.
+// This function should be used when the expected kinematic path assumes a stationary initial condition but does not specify a specific starting position.
+void initXYControllerStoppingPoint(float dt)
+{
+    initXYController(dt);
+
+    getStoppingPointXY(&_pos_target);
+
+    _vel_desired.x = 0.0f;
+    _vel_desired.y = 0.0f;
+    _accel_desired.x = 0.0f;
+    _accel_desired.y = 0.0f;
+}
+
+// initialise the position controller to the current position and velocity with decaying acceleration.
+// This function decays the output acceleration by 95% every half second to achieve a smooth transition to zero requested acceleration.
+void relaxVelocityXYController(float dt)
+{
+    #define POSCONTROL_RELAX_TC 0.16f // This is used to decay the I term to 5% in half a second.
+
+    // decay acceleration and therefore current attitude target to zero
+    // this will be reset by initXYController() if !isActiveXY()
+    if (dt > 0.0f) {
+        float decay = 1.0 - dt / (dt + POSCONTROL_RELAX_TC);
+        _accel_target.x *= decay;
+        _accel_target.y *= decay;
+    }
+
+    initXYController(dt);
+}
+
+// reduce response for landing
+static void softenForLandingXY(float dt)
+{
+    // decay position error to zero
+    if (dt > 0.0f) {
+        _pos_target.x += (navGetCurrentActualPositionAndVelocity()->pos.x - _pos_target.x) * (dt / (dt + POSCONTROL_RELAX_TC));
+        _pos_target.y += (navGetCurrentActualPositionAndVelocity()->pos.y - _pos_target.y) * (dt / (dt + POSCONTROL_RELAX_TC));
+    }
+}
+
+// runs the horizontal position controller correcting position, velocity and acceleration errors.
+//     Position and velocity errors are converted to velocity and acceleration targets using PID objects
+//     Desired velocity and accelerations are added to these corrections as they are calculated
+//     Kinematically consistent target position and desired velocity and accelerations should be provided before calling this function
+static void updateXYController(float dt)
+{
+    float ekfNavVelGainScaler = 1.0f; // TODO: verify if works better with this value or 0.5f
+    // Position Controller
+    const fpVector3_t curr_pos = navGetCurrentActualPositionAndVelocity()->pos;
+    fpVector3_t vel_target;
+
+    // Check for position control time out
+    if (!isActiveXY()) {
+        initXYController(dt);
+    }
+
+    last_update_xy_ticks = getSchedulerTicks32();
+
+    // calculate distance _error
+    fpVector3_t _error = { .v = { _pos_target.x - curr_pos.x, _pos_target.y - curr_pos.y, 0.0f }};
+
+    // Constrain _error and target position
+    // Constrain the maximum length of _vel_target to the maximum position correction velocity
+    const float error_length = calc_length_pythagorean_2D(_error.x, _error.y);
+    if (sqrt_controller_pos_xy.error_max > 0.0f && (error_length > sqrt_controller_pos_xy.error_max) && error_length > 0.0f) {
+        _error.x *= (sqrt_controller_pos_xy.error_max / error_length);
+        _error.y *= (sqrt_controller_pos_xy.error_max / error_length);
+        _pos_target.x = curr_pos.x + _error.x;
+        _pos_target.y = curr_pos.y + _error.y;
+    }
+
+    const float _error_length = calc_length_pythagorean_2D(_error.x, _error.y);
+
+    if (_error_length <= 0.0f) {
+        vel_target.x = 0.0f;
+        vel_target.y = 0.0f;
+    }
+
+    const float correction_length = sqrtControllerApply(&sqrt_controller_pos_xy, _error_length, 0.0f, 0.0f, SQRT_CONTROLLER_POS_XY);
+
+    vel_target.x = _error.x * (correction_length / _error_length);
+    vel_target.y = _error.y * (correction_length / _error_length);
+
+    // add velocity feed-forward
+    vel_target.x *= ekfNavVelGainScaler;
+    vel_target.y *= ekfNavVelGainScaler;
+    _vel_target.x = vel_target.x;
+    _vel_target.y = vel_target.y;
+    _vel_target.x += _vel_desired.x;
+    _vel_target.y += _vel_desired.y;
+
+    // Velocity Controller
+    const fpVector3_t curr_vel = navGetCurrentActualPositionAndVelocity()->vel;
+
+    // reset input filter to value received
+    if (reset_pid_vel_xy_filter) {
+        reset_pid_vel_xy_filter = false;
+        vel_xy_error.x = _vel_target.x - curr_vel.x;
+        vel_xy_error.y = _vel_target.y - curr_vel.y;
+        vel_xy_derivative.x = 0.0f;
+        vel_xy_derivative.y = 0.0f;
+    } else {
+        #define VEL_XY_ERROR_LPF_HZ 5.0f
+        fpVector3_t error_last = vel_xy_error;
+        vel_xy_error.x = pt1FilterApply4(&pid_vel_xy_error_filter[X], _vel_target.x - curr_vel.x, VEL_XY_ERROR_LPF_HZ, dt);
+        vel_xy_error.y = pt1FilterApply4(&pid_vel_xy_error_filter[Y], _vel_target.y - curr_vel.y, VEL_XY_ERROR_LPF_HZ, dt);
+        // calculate and filter derivative
+        if (dt > 0.0f) {
+            const fpVector3_t derivative = { .v = { (vel_xy_error.x - error_last.x) / dt, (vel_xy_error.y - error_last.y) / dt, 0.0f }};
+            vel_xy_derivative.x = pt1FilterApply4(&pid_vel_xy_derivative_filter[X], derivative.x, pidProfile()->navVelXyDTermLpfHz, dt);
+            vel_xy_derivative.y = pt1FilterApply4(&pid_vel_xy_derivative_filter[Y], derivative.y, pidProfile()->navVelXyDTermLpfHz, dt);
+        }
+    }
+
+    // update I term
+    fpVector3_t delta_integrator = { .v = { (vel_xy_error.x * posControl.pids.vel[X].param.kI) * dt, (vel_xy_error.y * posControl.pids.vel[Y].param.kI) * dt, 0.0f }};
+    float integrator_length = calc_length_pythagorean_2D(pid_vel_xy_integrator.x, pid_vel_xy_integrator.y);
+    pid_vel_xy_integrator.x += delta_integrator.x;
+    pid_vel_xy_integrator.y += delta_integrator.y;
+
+    const float len = calc_length_pythagorean_2D(pid_vel_xy_integrator.x, pid_vel_xy_integrator.y);
+
+    if ((len > integrator_length) && len > 0.0f) {
+        pid_vel_xy_integrator.x *= (integrator_length / len);
+        pid_vel_xy_integrator.y *= (integrator_length / len);
+    }
+
+    const float i_len = calc_length_pythagorean_2D(pid_vel_xy_integrator.x, pid_vel_xy_integrator.y);
+
+    if ((i_len > pid_vel_xy_kimax) && i_len > 0.0f) {
+        pid_vel_xy_integrator.x *= (pid_vel_xy_kimax / i_len);
+        pid_vel_xy_integrator.y *= (pid_vel_xy_kimax / i_len);
+    }
+
+    fpVector3_t accel_target;
+    accel_target.x = vel_xy_error.x * posControl.pids.vel[X].param.kP + pid_vel_xy_integrator.x + vel_xy_derivative.x * posControl.pids.vel[X].param.kD;
+    accel_target.y = vel_xy_error.y * posControl.pids.vel[Y].param.kP + pid_vel_xy_integrator.y + vel_xy_derivative.y * posControl.pids.vel[Y].param.kD;
+
+    // acceleration to correct for velocity error
+    accel_target.x *= ekfNavVelGainScaler;
+    accel_target.y *= ekfNavVelGainScaler;
+
+    // pass the correction acceleration to the target acceleration output
+    _accel_target.x = accel_target.x;
+    _accel_target.y = accel_target.y;
+
+    // Add feed forward into the target acceleration output
+    _accel_target.x += _accel_desired.y;
+    _accel_target.y += _accel_desired.y;
+
+    // Acceleration Controller
+
+    // limit acceleration using maximum lean angles
+    float angle_max = MIN((getAltHoldLeanAngleMax(dt)), navConfig()->mc.max_bank_angle);
+    float accel_max = GRAVITY_CMSS * tanf(DEGREES_TO_RADIANS(angle_max));
+
+    limitAccelXY(_vel_desired, &_accel_target, accel_max);
+
+    // rotate accelerations into body forward-right frame
+    const float accel_forward = _accel_target.x * posControl.actualState.cosYaw + _accel_target.y * posControl.actualState.sinYaw;
+    const float accel_right = -_accel_target.x * posControl.actualState.sinYaw + _accel_target.y * posControl.actualState.cosYaw;
+
+    // update angle targets that will be passed to stabilize controller
+    _pitch_target = RADIANS_TO_DECIDEGREES(atanf((-accel_forward / GRAVITY_CMSS)));
+    _roll_target = RADIANS_TO_DECIDEGREES(atanf((accel_right * cosf(DECIDEGREES_TO_RADIANS(_pitch_target)) / GRAVITY_CMSS)));
+}
+
+static void loiterInitTarget(bool resetPosition, float dt)
+{
+    #define LOITER_VEL_CORRECTION_MAX 200.0f
+    #define LOITER_POS_CORRECTION_MAX 200.0f
+    // initialise position controller speed and acceleration
+    const float kP = (posControl.pids.pos[X].param.kP + posControl.pids.pos[Y].param.kP) / 2.0f;
+    sqrtControllerInit(&sqrt_controller_pos_xy, kP, 0.0f, LOITER_VEL_CORRECTION_MAX, loiter_max_accel_xy, SQRT_CONTROLLER_POS_XY);
+    // reduce maximum position error to LOITER_POS_CORRECTION_MAX
+    if (sqrt_controller_pos_xy.error_max != 0.0f) {
+        sqrt_controller_pos_xy.error_max = MIN(sqrt_controller_pos_xy.error_max, LOITER_POS_CORRECTION_MAX);
+    } else {
+        sqrt_controller_pos_xy.error_max = LOITER_POS_CORRECTION_MAX;
+    }
+    
+    if (resetPosition) {
+        // initialise position controller
+        initXYControllerStoppingPoint(dt);
+        // initialise desired acceleration and angles to zero to remain on station
+        _predicted_accel.x = 0.0f;
+        _predicted_accel.y = 0.0f;
+        _desired_accel.x = 0.0f;
+        _desired_accel.y = 0.0f;
+        _predicted_euler_angle.x = 0.0f;
+        _predicted_euler_angle.y = 0.0f;
+
+        // set target position
+        _pos_target.x = navGetCurrentActualPositionAndVelocity()->pos.x;
+        _pos_target.y = navGetCurrentActualPositionAndVelocity()->pos.y;
+    } else {
+        // initialise position controller and move target accelerations smoothly towards zero
+        relaxVelocityXYController(dt);
+        // initialise predicted acceleration and angles from the position controller
+        _predicted_accel.x = _accel_target.x;
+        _predicted_accel.y = _accel_target.y;
+        _predicted_euler_angle.x = DECIDEGREES_TO_RADIANS(_roll_target);
+        _predicted_euler_angle.y = DECIDEGREES_TO_RADIANS(_pitch_target);
+    }
+
+    _brake_accel = 0.0f;
+}
+
+static void resetMulticopterXYPosControl(void)
+{
+    poshold.loop_rate_factor = (uint8_t)((1e6 / getLooptime()) / 100);
+
+    // initialise lean angles to current attitude
+    poshold.pilot_roll = 0.0f;
+    poshold.pilot_pitch = 0.0f;
+
+    // compute brake_gain
+    poshold.brake_gain = (15.0f * (float)poshold_brake_rate + 95.0f) / 100.0f;
+
+    if (isMulticopterLandingDetected()) {
+        // if landed begin in loiter mode
+        poshold.roll_mode = POSHOLD_LOITER;
+        poshold.pitch_mode = POSHOLD_LOITER;
+    } else {
+        // if not landed start in pilot override to avoid hard twitch
+        poshold.roll_mode = POSHOLD_PILOT_OVERRIDE;
+        poshold.pitch_mode = POSHOLD_PILOT_OVERRIDE;
+    }
+    
+    // initialise loiter
+    _desired_accel.x = 0.0f;
+    _desired_accel.y = 0.0f;
+    loiterInitTarget(false, US2S(getLooptime()));
+
+    // initialise wind_comp each time Pos-Hold is switched on
+    vectorZero(&poshold.wind_comp_ef);
+    poshold.wind_comp_roll = 0.0f;
+    poshold.wind_comp_pitch = 0.0f;
+    poshold.wind_comp_timer = 0;
+}
+
+// transform pilot's roll or pitch input into a desired lean angle
+static void getPilotDesiredLeanAngles(float *roll_out, float *pitch_out, float angle_max, float angle_limit)
+{
+    // throttle fail-safe check
+    if (FLIGHT_MODE(FAILSAFE_MODE)) {
+        *roll_out = 0.0f;
+        *pitch_out = 0.0f;
+        return;
+    }
+
+    const float roll_in_unit = (float)applyDeadbandRescaled(rcCommand[ROLL], rcControlsConfig()->pos_hold_deadband, -500, 500) * (1.0f / 500.0f);
+    const float pitch_in_unit = (float)applyDeadbandRescaled(rcCommand[PITCH], rcControlsConfig()->pos_hold_deadband, -500, 500) * (1.0f / 500.0f);
+
+    const float angle_max_deg = MIN(angle_max, 85.0f);
+    const float rc_2_rad = DEGREES_TO_RADIANS(angle_max_deg);
+
+    // fetch roll and pitch stick positions and convert them to normalised horizontal thrust
+    fpVector3_t thrust;
+    thrust.x = -tanf(rc_2_rad * pitch_in_unit);
+    thrust.y = tanf(rc_2_rad * roll_in_unit);
+
+    // calculate the horizontal thrust limit based on the angle limit
+    const float angle_limit_deg = constrainf(angle_limit, 10.0f, angle_max_deg);
+    const float thrust_limit = tanf(DEGREES_TO_RADIANS(angle_limit_deg));
+
+    // apply horizontal thrust limit
+    const float len = calc_length_pythagorean_2D(thrust.x, thrust.y);
+    if ((len > thrust_limit) && len > 0.0f) {
+        thrust.x *= (thrust_limit / len);
+        thrust.y *= (thrust_limit / len);
+    }
+
+    // Conversion from angular thrust vector to euler angles.
+    const float pitch_rad = -atanf(thrust.x);
+    const float roll_rad = atanf(cosf(pitch_rad) * thrust.y);
+
+    *roll_out = RADIANS_TO_DECIDEGREES(roll_rad);
+    *pitch_out = RADIANS_TO_DECIDEGREES(pitch_rad);
+}
+
+static void updateMulticopterLoiterControl(float dt)
+{
+    updateLoiterDesiredVelocity(dt);
+    updateXYController(dt);
+}
+
+// should be called once before the waypoint controller is used but does not need to be called before subsequent updates to destination
+void wpSplineInit(float speed_cms)
+{    
+    // check wp radius is reasonable
+    wp_radius_cm = MAX(wp_radius_cm, 5.0f);
+
+    // check wp speed
+    wp_speed_cms = MAX(wp_speed_cms, 20.0f);
+
+    // initialise position controller
+    initXYControllerStoppingPoint(US2S(getLooptime()));
+
+    // initialize the desired wp speed
+    wp_desired_speed_xy_cms = speed_cms > 0.0f ? speed_cms : wp_speed_cms;
+    wp_desired_speed_xy_cms = MAX(wp_desired_speed_xy_cms, 20.0f);
+
+    // initialise position controller speed and acceleration
+    const float kP = (posControl.pids.pos[X].param.kP + posControl.pids.pos[Y].param.kP) / 2.0f;
+    sqrtControllerInit(&sqrt_controller_pos_xy, kP, 0.0f, wp_desired_speed_xy_cms, _wp_accel_cmss, SQRT_CONTROLLER_POS_XY);
+
+    // calculate scurve jerk and jerk time
+    if (_wp_jerk <= 0.0f) {
+        _wp_jerk = _wp_accel_cmss;
+    }
+
+    // calculate maximum snap
+    // Snap (the rate of change of jerk) uses the attitude control input time constant because multicopters lean to accelerate.
+    // This means the change in angle is equivalent to the change in acceleration
+    wp_scurve_snap = (_wp_jerk * M_PI) / (2.0 * MAX((float)input_tc / 100.0f, 0.1f));
+    const float snap = MIN(DEGREES_TO_RADIANS(accel_roll_max), DEGREES_TO_RADIANS(accel_pitch_max)) * GRAVITY_MSS;
+    if (snap > 0.0f) {
+        wp_scurve_snap = MIN(wp_scurve_snap, snap);
+    }
+
+    // reduce maximum snap by a factor of two from what the aircraft is capable of
+    wp_scurve_snap *= 0.5f;
+
+    scurveInit(&scurve_prev_leg);
+    scurveInit(&scurve_this_leg);
+    scurveInit(&scurve_next_leg);
+    wp_track_scalar_dt = 1.0f;
+
+    vectorZero(&wp_origin);
+    vectorZero(&wp_destination);
+
+    wp_reached_destination = true;
+    fast_waypoint = false;
+
+    wp_this_leg_is_spline = false;
+
+    // initialise the terrain velocity to the current maximum velocity
+    wp_offset_vel = wp_desired_speed_xy_cms;
+    wp_offset_accel = 0.0;
+
+    // mark as active
+    wp_last_update = millis();
+}
+
+// returns true if update_wpnav has been run very recently
+bool wpIsActive(void)
+{
+    return (millis() - wp_last_update) < 200;
+}
+
+void setWPDestination(const fpVector3_t destination, float wp_manual_speed)
+{
+    // init way-point navigation
+    if (!wpIsActive()) {
+        const float des_speed_xy_cm = wp_manual_speed > 0.0f ? wp_manual_speed : 0.0f;
+        wpSplineInit(des_speed_xy_cm);
+    }
+
+    // re-initialise if previous destination has been interrupted
+    if (!wp_reached_destination) {
+        wpSplineInit(wp_desired_speed_xy_cms);
+    }
+
+    scurveInit(&scurve_prev_leg);
+
+    float origin_speed = 0.0f;
+
+    // use previous destination as origin
+    wp_origin = wp_destination;
+
+    if (wp_this_leg_is_spline) {
+        // if previous leg was a spline we can use current target velocity vector for origin velocity vector
+        origin_speed = calc_length_pythagorean_3D(_vel_desired.x, _vel_desired.y, _vel_desired.z);
+    } else {
+        // store previous leg
+        scurve_prev_leg = scurve_this_leg;
+    }
+
+    // update destination
+    wp_destination = destination;
+
+    if (fast_waypoint && !wp_this_leg_is_spline && !wp_next_leg_is_spline && !scurveFinished(&scurve_next_leg)) {
+        scurve_this_leg = scurve_next_leg;
+    } else {
+        scurveCalculateTrack(&scurve_this_leg, wp_origin, wp_destination,
+                                wp_speed_cms, navConfig()->mc.max_auto_climb_rate, -fabsf((float)navConfig()->mc.max_auto_climb_rate),
+                                _wp_accel_cmss, _wp_accel_z_cmss,
+                                wp_scurve_snap * 100.0f, _wp_jerk * 100.0f);
+
+        if (origin_speed != 0.0f) {
+            // rebuild start of scurve if we have a non-zero origin speed
+            scurveSetOriginSpeeMax(&scurve_this_leg, origin_speed);
+        }
+    }
+
+    wp_this_leg_is_spline = false;
+    scurveInit(&scurve_next_leg);
+    fast_waypoint = false; // default waypoint back to slow
+    wp_reached_destination = false;
+}
+
+void setWPDestinationNext(const fpVector3_t destination)
+{
+    if (destination.x == 0.0f && destination.y == 0.0f) {
+        return;
+    }
+
+    scurveCalculateTrack(&scurve_next_leg, wp_destination, destination,
+                            wp_speed_cms, navConfig()->mc.max_auto_climb_rate, -fabsf((float)navConfig()->mc.max_auto_climb_rate),
+                            _wp_accel_cmss, _wp_accel_z_cmss,
+                            wp_scurve_snap * 100.0f, _wp_jerk * 100.0f);
+
+    if (wp_this_leg_is_spline) {
+        const float this_leg_dest_speed_max = spline_this_leg._destination_speed_max;
+        const float next_leg_origin_speed_max = scurveSetOriginSpeeMax(&scurve_next_leg, this_leg_dest_speed_max);
+        spline_this_leg._destination_speed_max = MIN(spline_this_leg._destination_speed_max, next_leg_origin_speed_max);
+    }
+    
+    wp_next_leg_is_spline = false;
+
+    // next destination provided so fast waypoint
+    fast_waypoint = true;
+}
+
+// initiate move to next waypoint
+// call this function inside of navOnEnteringState_NAV_STATE_WAYPOINT_PRE_ACTION in NAV_WP_ACTION_WAYPOINT switch case
+void startMulticopterWPNavigation(const fpVector3_t dest_loc, const fpVector3_t next_dest_loc)
+{
+    const float wp_manual_speed = getActiveSpeed();
+
+    setWPDestination(dest_loc, wp_manual_speed);
+
+    // range check target speed and protect against divide by zero
+    if (wp_manual_speed >= 20.0f && wp_desired_speed_xy_cms > 0.0f) {
+        // update horizontal velocity speed offset scalar
+        wp_offset_vel = wp_manual_speed * wp_offset_vel / wp_desired_speed_xy_cms;
+
+        // initialize the desired wp speed
+        wp_desired_speed_xy_cms = wp_manual_speed;
+
+        // initialise position controller speed and acceleration
+        const float kP = (posControl.pids.pos[X].param.kP + posControl.pids.pos[Y].param.kP) / 2.0f;
+        sqrtControllerInit(&sqrt_controller_pos_xy, kP, 0.0f, wp_desired_speed_xy_cms, _wp_accel_cmss, SQRT_CONTROLLER_POS_XY);
+
+        // change track speed - update this leg
+        if (wp_this_leg_is_spline) {
+            splineCurveSetSpeedAccel(&spline_this_leg, wp_desired_speed_xy_cms, navConfig()->mc.max_auto_climb_rate, -fabsf((float)navConfig()->mc.max_auto_climb_rate), _wp_accel_cmss, _wp_accel_z_cmss);
+        } else {
+            scurveSetSpeedMax(&scurve_this_leg, wp_desired_speed_xy_cms, navConfig()->mc.max_auto_climb_rate, -fabsf((float)navConfig()->mc.max_auto_climb_rate));
+        }
+
+        // change track speed - update next leg
+        if (wp_next_leg_is_spline) {
+            splineCurveSetSpeedAccel(&spline_next_leg, wp_desired_speed_xy_cms, navConfig()->mc.max_auto_climb_rate, -fabsf((float)navConfig()->mc.max_auto_climb_rate), _wp_accel_cmss, _wp_accel_z_cmss);
+        } else {
+            scurveSetSpeedMax(&scurve_next_leg, wp_desired_speed_xy_cms, navConfig()->mc.max_auto_climb_rate, -fabsf((float)navConfig()->mc.max_auto_climb_rate));
+        }
+    }
+
+    // set next destination if necessary
+    setWPDestinationNext(next_dest_loc);
+}
+
+// move target location along track from origin to destination
+void advanceWPTargetAlongTrack(float dt)
+{
+    // get current position
+    const fpVector3_t curr_pos = navGetCurrentActualPositionAndVelocity()->pos;
+    const fpVector3_t curr_vel = navGetCurrentActualPositionAndVelocity()->vel;
+    const fpVector3_t curr_target_vel = _vel_desired;
+
+    // Use wp_track_scalar_dt to slow down progression of the position target moving too far in front of aircraft wp_track_scalar_dt does not scale the velocity or acceleration
+    float track_scaler_dt = 1.0f;
+
+    // check target velocity is non-zero
+    if (sq(curr_target_vel.x) + sq(curr_target_vel.y) + sq(curr_target_vel.z) > 0.0f) {
+        const float curr_vel_len = calc_length_pythagorean_3D(curr_target_vel.x, curr_target_vel.y, curr_target_vel.z);
+        fpVector3_t track_direction = { .v = { curr_target_vel.x / curr_vel_len, curr_target_vel.y / curr_vel_len, curr_target_vel.z / curr_vel_len }};
+        const float track_error = ((_pos_target.x - curr_pos.x) * track_direction.x) + ((_pos_target.y - curr_pos.y) * track_direction.y) + ((_pos_target.z - curr_pos.z) * track_direction.z);
+        const float track_velocity = curr_vel.x * track_direction.x + curr_vel.y * track_direction.y + curr_vel.z * track_direction.z;
+        // set time scaler to be consistent with the achievable aircraft speed with a 5% buffer for short term variation.
+        const float kP = (posControl.pids.pos[X].param.kP + posControl.pids.pos[Y].param.kP) / 2.0f;
+        track_scaler_dt = constrainf(0.05f + (track_velocity - kP * track_error) / curr_vel_len, 0.0f, 1.0f);
+    }
+
+    // Use vel_scaler_dt to slow down the trajectory time vel_scaler_dt scales the velocity and acceleration to be kinematically consistent
+    float vel_scaler_dt = 1.0f;
+    if (wp_desired_speed_xy_cms > 0.0f) {
+        const float delta_vel = wp_offset_accel * dt;
+        wp_offset_vel += delta_vel;
+        
+        const float accel_min = -_wp_accel_cmss;
+
+        // sanity check accel_min, accel_max and jerk_max.
+        if (accel_min < 0.0f || _wp_accel_cmss > 0.0f || wp_shaping_jerk_xy > 0.0f) {
+            // velocity error to be corrected
+            const float vel_error = wp_desired_speed_xy_cms - wp_offset_vel;
+
+            // Calculate time constants and limits to ensure stable operation
+            // The direction of acceleration limit is the same as the velocity error.
+            // This is because the velocity error is negative when slowing down while
+            // closing a positive position error.
+            float KPa;
+            if (vel_error > 0.0f) {
+                KPa = wp_shaping_jerk_xy / _wp_accel_cmss;
+            } else {
+                KPa = wp_shaping_jerk_xy / (-accel_min);
+            }
+
+            // acceleration to correct velocity
+            sqrt_controller_waypoint.derivative_max = wp_shaping_jerk_xy;
+            sqrt_controller_waypoint.kp = KPa;
+            float accel_target = sqrtControllerApply(&sqrt_controller_waypoint, vel_error, 0.0f, dt, SQRT_CONTROLLER_POS_XY);
+
+            // constrain correction acceleration from accel_min to _wp_accel_cmss
+            accel_target = constrainf(accel_target, accel_min, _wp_accel_cmss);
+
+            // constrain total acceleration from accel_min to _wp_accel_cmss
+            accel_target = constrainf(accel_target, accel_min, _wp_accel_cmss);
+
+            // jerk limit acceleration change
+            if (dt > 0.0f && wp_shaping_jerk_xy > 0.0f) {
+                float accel_delta = accel_target - wp_offset_accel;
+                accel_delta = constrainf(accel_delta, -wp_shaping_jerk_xy * dt, wp_shaping_jerk_xy * dt);
+                wp_offset_accel += accel_delta;
+            }
+        }
+
+        vel_scaler_dt = wp_offset_vel / wp_desired_speed_xy_cms;
+    }
+
+    // change s-curve time speed with a time constant of maximum acceleration / maximum jerk
+    float track_scaler_tc = 1.0f;
+    if (_wp_jerk != 0.0f) {
+        track_scaler_tc = 0.01f * _wp_accel_cmss / _wp_jerk;
+    }
+
+    wp_track_scalar_dt += (track_scaler_dt - wp_track_scalar_dt) * (dt / track_scaler_tc);
+
+    // target position, velocity and acceleration from straight line or spline calculators
+    fpVector3_t target_pos;
+    fpVector3_t target_vel;
+    fpVector3_t target_accel;
+
+    bool s_finished;
+
+    if (!wp_this_leg_is_spline) {
+        // update target position, velocity and acceleration
+        target_pos = wp_origin;
+        s_finished = scurveAdvanceTargetAlongTrack(&scurve_this_leg, &scurve_prev_leg, &scurve_next_leg, wp_radius_cm, _wp_accel_cmss, fast_waypoint, wp_track_scalar_dt * vel_scaler_dt * dt, &target_pos, &target_vel, &target_accel);
+    } else {
+        // spline target_vel
+        target_vel = curr_target_vel;
+        splineCurveAdvanceTargetAlongTrack(&spline_this_leg, wp_track_scalar_dt * vel_scaler_dt * dt, &target_pos, &target_vel);
+        s_finished = spline_this_leg._reached_destination;
+    }
+
+    fpVector3_t accel_offset;
+    if (sq(target_vel.x) + sq(target_vel.y) + sq(target_vel.z) > 0.0f) {
+        const float target_vel_len = calc_length_pythagorean_3D(target_vel.x, target_vel.y, target_vel.z);
+        fpVector3_t track_direction = { .v = { target_vel.x / target_vel_len, target_vel.y / target_vel_len, target_vel.z / target_vel_len }};
+        accel_offset.x = track_direction.x * wp_offset_accel * target_vel_len / wp_desired_speed_xy_cms;
+        accel_offset.y = track_direction.y * wp_offset_accel * target_vel_len / wp_desired_speed_xy_cms;
+        accel_offset.z = track_direction.z * wp_offset_accel * target_vel_len / wp_desired_speed_xy_cms;
+    }
+
+    target_vel.x *= vel_scaler_dt;
+    target_vel.y *= vel_scaler_dt;
+    target_vel.z *= vel_scaler_dt;
+    target_accel.x *= sq(vel_scaler_dt);
+    target_accel.y *= sq(vel_scaler_dt);
+    target_accel.z *= sq(vel_scaler_dt);
+    target_accel.x += accel_offset.x;
+    target_accel.y += accel_offset.y;
+    target_accel.z += accel_offset.z;
+
+    // pass new target to the position controller
+    // TODO: For now we cannot change the Z axis target because it still uses the old INAV altitude controller.
+    _pos_target.x = target_pos.x;
+    _pos_target.y = target_pos.y;
+    _vel_desired.x = target_vel.x;
+    _vel_desired.y = target_vel.y;
+    _accel_desired.x = target_accel.x;
+    _accel_desired.y = target_accel.y;
+
+    debug[6] = _pos_target.x;
+    debug[7] = _pos_target.y;
+
+    // check if we've reached the waypoint
+    if (!wp_reached_destination) {
+        if (s_finished) {
+            // "fast" waypoints are complete once the intermediate point reaches the destination
+            if (fast_waypoint) {
+                wp_reached_destination = true;
+            } else {
+                // regular waypoints also require the copter to be within the waypoint radius
+                const fpVector3_t dist_to_dest = { .v = { curr_pos.x - wp_destination.x, curr_pos.y - wp_destination.y, curr_pos.z - wp_destination.z }};
+                if ((sq(dist_to_dest.x) + sq(dist_to_dest.y) + sq(dist_to_dest.z)) <= sq(wp_radius_cm)) {
+                    wp_reached_destination = true;
+                }
+            }
+        }
+    }
+}
+
+bool isMulticopterWPReached(void)
+{
+    return wp_reached_destination;
+}
+
+static void updateMulticopterXYPosControl(float dt)
+{
+    float target_roll;  // pilot's roll angle input
+    float target_pitch; // pilot's pitch angle input
+    const float lean_angle_max = DEGREES_TO_DECIDEGREES(navConfig()->mc.max_bank_angle);
+
+    // Way-Point and RTH mode
+    if ((navGetCurrentStateFlags() & NAV_AUTO_WP) || (navGetCurrentStateFlags() & NAV_AUTO_RTH)) {
+        advanceWPTargetAlongTrack(dt);
+        
+        updateXYController(dt);
+        
+        wp_last_update = millis();
+        
+        int16_t angleOut[2];
+
+        // constrain target pitch/roll angles
+        angleOut[ROLL] = constrainf(_roll_target, -lean_angle_max, lean_angle_max);
+        angleOut[PITCH] = constrainf(_pitch_target, -lean_angle_max, lean_angle_max);
+
+        debug[0] = angleOut[ROLL];
+        debug[1] = angleOut[PITCH];
+
+        //posControl.rcAdjustment[ROLL] = angleOut[ROLL];
+        //posControl.rcAdjustment[PITCH] = angleOut[PITCH];
+    }
+    
+    // Loiter mode
+    /*if (navConfig()->general.flags.user_control_mode == NAV_GPS_CRUISE) {
+        float roll_out;
+        float pitch_out;
+
+        if (!FLIGHT_MODE(FAILSAFE_MODE)) {
+            // convert pilot input to lean angles
+            getPilotDesiredLeanAngles(&roll_out, &pitch_out, getLoiterAngleMax(), getAltHoldLeanAngleMax(dt));
+            // process pilot's roll and pitch input
+            setPilotDesiredAcceleration(roll_out, pitch_out, dt);
+        } else {
+            // clear out pilot desired acceleration in case radio fail-safe event occurs
+            _desired_accel.x = 0.0f;
+            _desired_accel.y = 0.0f;
+        }
+
+        //if (isMulticopterLandingDetected()) // TODO: I'm still not sure if Land's detector is reliable enough to use here.
+        //{
+            //loiterInitTarget(false, dt);
+            //softenForLandingXY(dt);
+        //}
+
+        updateMulticopterLoiterControl(dt);
+
+        int16_t angleOut[2];
+
+        // constrain target pitch/roll angles
+        angleOut[ROLL] = constrainf(_roll_target, -lean_angle_max, lean_angle_max);
+        angleOut[PITCH] = constrainf(_pitch_target, -lean_angle_max, lean_angle_max);
+
+        debug[0] = angleOut[ROLL];
+        debug[1] = angleOut[PITCH];
+
+        //posControl.rcAdjustment[ROLL] = angleOut[ROLL];
+        //posControl.rcAdjustment[PITCH] = angleOut[PITCH];
+    }*/
+    
+    // Pos-Hold mode
+    if (FLIGHT_MODE(NAV_POSHOLD_MODE)) {
+        _desired_accel.x = 0.0f;
+        _desired_accel.y = 0.0f;
+
+        // convert pilot input to lean angles
+        getPilotDesiredLeanAngles(&target_roll, &target_pitch, navConfig()->mc.max_bank_angle, getAltHoldLeanAngleMax(dt));
+
+        //if (isMulticopterLandingDetected()) // TODO: I'm still not sure if Land's detector is reliable enough to use here.
+        //{
+            //loiterInitTarget(false, dt);
+            //softenForLandingXY(dt);
+        //}
+
+        // convert inertial nav earth-frame velocities to body-frame
+        const float vel_fw = navGetCurrentActualPositionAndVelocity()->vel.x * posControl.actualState.cosYaw + navGetCurrentActualPositionAndVelocity()->vel.y * posControl.actualState.sinYaw;
+        const float vel_right = -navGetCurrentActualPositionAndVelocity()->vel.x * posControl.actualState.sinYaw + navGetCurrentActualPositionAndVelocity()->vel.y * posControl.actualState.cosYaw;
+        
+        // If not in LOITER, retrieve latest wind compensation lean angles related to current yaw
+        if (poshold.roll_mode != POSHOLD_LOITER || poshold.pitch_mode != POSHOLD_LOITER) {
+            posHoldGetWindCompLeanAngles(&poshold.wind_comp_roll, &poshold.wind_comp_pitch);
+        }
+
+        // Roll state machine
+        //  Each state (aka mode) is responsible for:
+        //      1. dealing with pilot input
+        //      2. calculating the final roll output to the attitude controller
+        //      3. checking if the state (aka mode) should be changed and if 'yes' perform any required initialisation for the new state
+        switch (poshold.roll_mode) {
+
+            case POSHOLD_PILOT_OVERRIDE:
+                // update pilot desired roll angle using latest radio input
+                // this filters the input so that it returns to zero no faster than the brake-rate
+                posHoldUpdatePilotLeanAngle(&poshold.pilot_roll, target_roll);
+
+                // switch to BRAKE mode for next iteration if no pilot input
+                if (target_roll == 0.0f && (fabsf(poshold.pilot_roll) < 2 * poshold_brake_rate)) {
+                    // initialise BRAKE mode
+                    poshold.roll_mode = POSHOLD_BRAKE;                            // set brake roll mode
+                    poshold.brake_roll = 0.0f;                                    // initialise braking angle to zero
+                    poshold.brake_angle_max_roll = 0.0f;                          // reset brake_angle_max so we can detect when vehicle begins to flatten out during braking
+                    poshold.brake_timeout_roll = POSHOLD_BRAKE_TIME_ESTIMATE_MAX; // number of cycles the brake will be applied, updated during braking mode.
+                    poshold.braking_time_updated_roll = false;                    // flag the braking time can be re-estimated
+                }
+
+                // final lean angle should be pilot input plus wind compensation
+                poshold.roll = poshold.pilot_roll + poshold.wind_comp_roll;
+                break;
+
+            case POSHOLD_BRAKE:
+            case POSHOLD_BRAKE_READY_TO_LOITER:
+                // calculate brake_roll angle to counter-act velocity
+                posHoldUpdateBrakeAngleFromVelocity(&poshold.brake_roll, vel_right);
+
+                // update braking time estimate
+                if (!poshold.braking_time_updated_roll) {
+                    // check if brake angle is increasing
+                    if (fabsf(poshold.brake_roll) >= poshold.brake_angle_max_roll) {
+                        poshold.brake_angle_max_roll = fabsf(poshold.brake_roll);
+                    } else {
+                        // braking angle has started decreasing so re-estimate braking time
+                        poshold.brake_timeout_roll = 1+(uint16_t)(LOOP_RATE_FACTOR*15L*(int32_t)(fabsf(poshold.brake_roll))/(10L*(int32_t)poshold_brake_rate));  // the 1.2 (12/10) factor has to be tuned in flight, here it means 120% of the "normal" time.
+                        poshold.braking_time_updated_roll = true;
+                    }
+                }
+
+                // if velocity is very low reduce braking time to 0.5seconds
+                if ((fabsf(vel_right) <= POSHOLD_SPEED_0) && (poshold.brake_timeout_roll > 50*LOOP_RATE_FACTOR)) {
+                    poshold.brake_timeout_roll = 50*LOOP_RATE_FACTOR;
+                }
+
+                // reduce braking timer
+                if (poshold.brake_timeout_roll > 0) {
+                    poshold.brake_timeout_roll--;
+                } else {
+                    // indicate that we are ready to move to Loiter.
+                    // Loiter will only actually be engaged once both roll_mode and pitch_mode are changed to POSHOLD_BRAKE_READY_TO_LOITER
+                    // logic for engaging loiter is handled below the roll and pitch mode switch statements
+                    poshold.roll_mode = POSHOLD_BRAKE_READY_TO_LOITER;
+                }
+
+                // final lean angle is braking angle + wind compensation angle
+                poshold.roll = poshold.brake_roll + poshold.wind_comp_roll;
+
+                // check for pilot input
+                if (target_roll != 0.0f) {
+                    // init transition to pilot override
+                    posHoldRollControllerToPilotOverride();
+                }
+                break;
+
+            case POSHOLD_BRAKE_TO_LOITER:
+            case POSHOLD_LOITER:
+                // these modes are combined roll-pitch modes and are handled below
+                break;
+
+            case POSHOLD_CONTROLLER_TO_PILOT_OVERRIDE:
+                // update pilot desired roll angle using latest radio input
+                //  this filters the input so that it returns to zero no faster than the brake-rate
+                posHoldUpdatePilotLeanAngle(&poshold.pilot_roll, target_roll);
+
+                // count-down loiter to pilot timer
+                if (poshold.controller_to_pilot_timer_roll > 0) {
+                    poshold.controller_to_pilot_timer_roll--;
+                } else {
+                    // when timer runs out switch to full pilot override for next iteration
+                    poshold.roll_mode = POSHOLD_PILOT_OVERRIDE;
+                }
+
+                // mix of controller and pilot controls. 0 = fully last controller controls, 1 = fully pilot controls
+                const float controller_to_pilot_roll_mix = (float)poshold.controller_to_pilot_timer_roll / (float)POSHOLD_CONTROLLER_TO_PILOT_MIX_TIMER;
+
+                // mix final loiter lean angle and pilot desired lean angles
+                poshold.roll = posHoldMixControls(controller_to_pilot_roll_mix, poshold.controller_final_roll, poshold.pilot_roll + poshold.wind_comp_roll);
+                break;
+        }
+
+        // Pitch state machine
+        //  Each state (aka mode) is responsible for:
+        //      1. dealing with pilot input
+        //      2. calculating the final pitch output to the attitude contpitcher
+        //      3. checking if the state (aka mode) should be changed and if 'yes' perform any required initialisation for the new state
+        switch (poshold.pitch_mode) {
+
+            case POSHOLD_PILOT_OVERRIDE:
+                // update pilot desired pitch angle using latest radio input
+                //  this filters the input so that it returns to zero no faster than the brake-rate
+                posHoldUpdatePilotLeanAngle(&poshold.pilot_pitch, target_pitch);
+
+                // switch to BRAKE mode for next iteration if no pilot input
+                if (target_pitch == 0.0f && (fabsf(poshold.pilot_pitch) < 2 * poshold_brake_rate)) {
+                    // initialise BRAKE mode
+                    poshold.pitch_mode = POSHOLD_BRAKE;                            // set brake pitch mode
+                    poshold.brake_pitch = 0.0f;                                    // initialise braking angle to zero
+                    poshold.brake_angle_max_pitch = 0.0f;                          // reset brake_angle_max so we can detect when vehicle begins to flatten out during braking
+                    poshold.brake_timeout_pitch = POSHOLD_BRAKE_TIME_ESTIMATE_MAX; // number of cycles the brake will be applied, updated during braking mode.
+                    poshold.braking_time_updated_pitch = false;                    // flag the braking time can be re-estimated
+                }
+
+                // final lean angle should be pilot input plus wind compensation
+                poshold.pitch = poshold.pilot_pitch + poshold.wind_comp_pitch;
+                break;
+
+            case POSHOLD_BRAKE:
+            case POSHOLD_BRAKE_READY_TO_LOITER:
+                // calculate brake_pitch angle to counter-act velocity
+                posHoldUpdateBrakeAngleFromVelocity(&poshold.brake_pitch, -vel_fw);
+
+                // update braking time estimate
+                if (!poshold.braking_time_updated_pitch) {
+                    // check if brake angle is increasing
+                    if (fabsf(poshold.brake_pitch) >= poshold.brake_angle_max_pitch) {
+                        poshold.brake_angle_max_pitch = fabsf(poshold.brake_pitch);
+                    } else {
+                        // braking angle has started decreasing so re-estimate braking time
+                        poshold.brake_timeout_pitch = 1+(uint16_t)(LOOP_RATE_FACTOR*15L*(int32_t)(fabsf(poshold.brake_pitch))/(10L*(int32_t)poshold_brake_rate));  // the 1.2 (12/10) factor has to be tuned in flight, here it means 120% of the "normal" time.
+                        poshold.braking_time_updated_pitch = true;
+                    }
+                }
+
+                // if velocity is very low reduce braking time to 0.5seconds
+                if ((fabsf(vel_fw) <= POSHOLD_SPEED_0) && (poshold.brake_timeout_pitch > 50*LOOP_RATE_FACTOR)) {
+                    poshold.brake_timeout_pitch = 50*LOOP_RATE_FACTOR;
+                }
+
+                // reduce braking timer
+                if (poshold.brake_timeout_pitch > 0) {
+                    poshold.brake_timeout_pitch--;
+                } else {
+                    // indicate that we are ready to move to Loiter.
+                    // Loiter will only actually be engaged once both pitch_mode and pitch_mode are changed to POSHOLD_BRAKE_READY_TO_LOITER
+                    //  logic for engaging loiter is handled below the pitch and pitch mode switch statements
+                    poshold.pitch_mode = POSHOLD_BRAKE_READY_TO_LOITER;
+                }
+
+                // final lean angle is braking angle + wind compensation angle
+                poshold.pitch = poshold.brake_pitch + poshold.wind_comp_pitch;
+
+                // check for pilot input
+                if (target_pitch != 0.0f) {
+                    // init transition to pilot override
+                    posHoldPitchControllerToPilotOverride();
+                }
+                break;
+
+            case POSHOLD_BRAKE_TO_LOITER:
+            case POSHOLD_LOITER:
+                // these modes are combined pitch-pitch modes and are handled below
+                break;
+
+            case POSHOLD_CONTROLLER_TO_PILOT_OVERRIDE:
+                // update pilot desired pitch angle using latest radio input
+                // this filters the input so that it returns to zero no faster than the brake-rate
+                posHoldUpdatePilotLeanAngle(&poshold.pilot_pitch, target_pitch);
+
+                // count-down loiter to pilot timer
+                if (poshold.controller_to_pilot_timer_pitch > 0) {
+                    poshold.controller_to_pilot_timer_pitch--;
+                } else {
+                    // when timer runs out switch to full pilot override for next iteration
+                    poshold.pitch_mode = POSHOLD_PILOT_OVERRIDE;
+                }
+
+                // mix of controller and pilot controls. 0 = fully last controller controls, 1 = fully pilot controls
+                const float controller_to_pilot_pitch_mix = (float)poshold.controller_to_pilot_timer_pitch / (float)POSHOLD_CONTROLLER_TO_PILOT_MIX_TIMER;
+
+                // mix final loiter lean angle and pilot desired lean angles
+                poshold.pitch = posHoldMixControls(controller_to_pilot_pitch_mix, poshold.controller_final_pitch, poshold.pilot_pitch + poshold.wind_comp_pitch);
+                break;
+        }
+
+        // switch into LOITER mode when both roll and pitch are ready
+        if (poshold.roll_mode == POSHOLD_BRAKE_READY_TO_LOITER && poshold.pitch_mode == POSHOLD_BRAKE_READY_TO_LOITER) {
+            poshold.roll_mode = POSHOLD_BRAKE_TO_LOITER;
+            poshold.pitch_mode = POSHOLD_BRAKE_TO_LOITER;
+            poshold.brake_to_loiter_timer = POSHOLD_BRAKE_TO_LOITER_TIMER;
+            // init loiter controller
+            loiterInitTarget(true, dt);
+            // set delay to start of wind compensation estimate updates
+            poshold.wind_comp_start_timer = POSHOLD_WIND_COMP_START_TIMER;
+        }
+
+        // roll-mode is used as the combined roll+pitch mode when in BRAKE_TO_LOITER or LOITER modes
+        if (poshold.roll_mode == POSHOLD_BRAKE_TO_LOITER || poshold.roll_mode == POSHOLD_LOITER) {
+            // force pitch mode to be same as roll_mode just to keep it consistent (it's not actually used in these states)
+            poshold.pitch_mode = poshold.roll_mode;
+
+            // handle combined roll+pitch mode
+            switch (poshold.roll_mode) {
+                case POSHOLD_BRAKE_TO_LOITER:
+                    // reduce brake_to_loiter timer
+                    if (poshold.brake_to_loiter_timer > 0) {
+                        poshold.brake_to_loiter_timer--;
+                    } else {
+                        // progress to full loiter on next iteration
+                        poshold.roll_mode = POSHOLD_LOITER;
+                        poshold.pitch_mode = POSHOLD_LOITER;
+                    }
+
+                    // mix of brake and loiter controls.  0 = fully brake controls, 1 = fully loiter controls
+                    const float brake_to_loiter_mix = (float)poshold.brake_to_loiter_timer / (float)POSHOLD_BRAKE_TO_LOITER_TIMER;
+
+                    // calculate brake_roll and pitch angles to counter-act velocity
+                    posHoldUpdateBrakeAngleFromVelocity(&poshold.brake_roll, vel_right);
+                    posHoldUpdateBrakeAngleFromVelocity(&poshold.brake_pitch, -vel_fw);
+                    
+                    updateMulticopterLoiterControl(dt);
+
+                    // calculate final roll and pitch output by mixing loiter and brake controls
+                    poshold.roll = posHoldMixControls(brake_to_loiter_mix, poshold.brake_roll + poshold.wind_comp_roll, _roll_target);
+                    poshold.pitch = posHoldMixControls(brake_to_loiter_mix, poshold.brake_pitch + poshold.wind_comp_pitch, _pitch_target);
+
+                    // check for pilot input
+                    if (target_roll != 0.0f || target_pitch != 0.0f) {
+                        // if roll input switch to pilot override for roll
+                        if (target_roll != 0.0f) {
+                            // init transition to pilot override
+                            posHoldRollControllerToPilotOverride();
+                            // switch pitch-mode to brake (but ready to go back to loiter anytime)
+                            // no need to reset poshold.brake_pitch here as wind comp has not been updated since last brake_pitch computation
+                            poshold.pitch_mode = POSHOLD_BRAKE_READY_TO_LOITER;
+                        }
+                        // if pitch input switch to pilot override for pitch
+                        if (target_pitch != 0.0f) {
+                            // init transition to pilot override
+                            posHoldPitchControllerToPilotOverride();
+                            if (target_roll == 0.0f) {
+                                // switch roll-mode to brake (but ready to go back to loiter anytime)
+                                // no need to reset poshold.brake_roll here as wind comp has not been updated since last brake_roll computation
+                                poshold.roll_mode = POSHOLD_BRAKE_READY_TO_LOITER;
+                            }
+                        }
+                    }
+                    break;
+
+                case POSHOLD_LOITER:
+                    updateMulticopterLoiterControl(dt);
+
+                    poshold.roll = _roll_target;
+                    poshold.pitch = _pitch_target;
+
+                    // update wind compensation estimate
+                    posHoldUpdateWindCompEstimate();
+
+                    // check for pilot input
+                    if (target_roll != 0.0f || target_pitch != 0.0f) {
+                        // if roll input switch to pilot override for roll
+                        if (target_roll != 0.0f) {
+                            // init transition to pilot override
+                            posHoldRollControllerToPilotOverride();
+                            // switch pitch-mode to brake (but ready to go back to loiter anytime)
+                            poshold.pitch_mode = POSHOLD_BRAKE_READY_TO_LOITER;
+                            // reset brake_pitch because wind_comp is now different and should give the compensation of the whole previous loiter angle
+                            poshold.brake_pitch = 0.0f;
+                        }
+                        // if pitch input switch to pilot override for pitch
+                        if (target_pitch != 0.0f) {
+                            // init transition to pilot override
+                            posHoldPitchControllerToPilotOverride();
+                            // if roll not overridden switch roll-mode to brake (but be ready to go back to loiter any time)
+                            if (target_roll == 0.0f) {
+                                poshold.roll_mode = POSHOLD_BRAKE_READY_TO_LOITER;
+                                poshold.brake_roll = 0.0f;
+                            }
+                        }
+                    }
+                    break;
+
+                default:
+                    // do nothing for uncombined roll and pitch modes
+                    break;
+            }
+        }
+
+        int16_t angleOut[2];
+
+        // constrain target pitch/roll angles
+        angleOut[ROLL] = constrainf(poshold.roll, -lean_angle_max, lean_angle_max);
+        angleOut[PITCH] = constrainf(poshold.pitch, -lean_angle_max, lean_angle_max);
+
+        debug[2] = angleOut[ROLL];
+        debug[3] = angleOut[PITCH];
+
+        //posControl.rcAdjustment[ROLL] = angleOut[ROLL];
+        //posControl.rcAdjustment[PITCH] = angleOut[PITCH];
+    }
+}
+
 static void updatePositionAccelController_MC(timeDelta_t deltaMicros, float maxAccelLimit, const float maxSpeed)
 {
     const float measurementX = navGetCurrentActualPositionAndVelocity()->vel.x;
@@ -615,6 +2296,7 @@ static void updatePositionAccelController_MC(timeDelta_t deltaMicros, float maxA
         multicopterPosXyCoefficients.dTermAttenuationStart,
         multicopterPosXyCoefficients.dTermAttenuationEnd
     );
+    
     const float measurementScale = computeVelocityScale(
         posControl.actualState.velXY,
         maxSpeed,
@@ -623,7 +2305,7 @@ static void updatePositionAccelController_MC(timeDelta_t deltaMicros, float maxA
         multicopterPosXyCoefficients.dTermAttenuationEnd
     );
 
-    //Choose smaller attenuation factor and convert from attenuation to scale
+    // Choose smaller attenuation factor and convert from attenuation to scale
     const float dtermScale = 1.0f - MIN(setpointScale, measurementScale);
 
     // Apply PID with output limiting and I-term anti-windup
@@ -640,6 +2322,7 @@ static void updatePositionAccelController_MC(timeDelta_t deltaMicros, float maxA
         1.0f,   // Total gain scale
         dtermScale    // Additional dTerm scale
     );
+
     float newAccelY = navPidApply3(
         &posControl.pids.vel[Y],
         setpointY,
@@ -693,6 +2376,9 @@ static void updatePositionAccelController_MC(timeDelta_t deltaMicros, float maxA
 
     posControl.rcAdjustment[ROLL] = constrain(RADIANS_TO_DECIDEGREES(desiredRoll), -maxBankAngle, maxBankAngle);
     posControl.rcAdjustment[PITCH] = constrain(RADIANS_TO_DECIDEGREES(desiredPitch), -maxBankAngle, maxBankAngle);
+
+    debug[4] = posControl.rcAdjustment[ROLL];
+    debug[5] = posControl.rcAdjustment[PITCH];
 }
 
 static void applyMulticopterPositionController(timeUs_t currentTimeUs)
@@ -703,7 +2389,6 @@ static void applyMulticopterPositionController(timeUs_t currentTimeUs)
         /* No position data, disable automatic adjustment, rcCommand passthrough */
         posControl.rcAdjustment[PITCH] = 0;
         posControl.rcAdjustment[ROLL] = 0;
-
         return;
     }
 
@@ -730,6 +2415,7 @@ static void applyMulticopterPositionController(timeUs_t currentTimeUs)
             float maxSpeed = getActiveSpeed();
             updatePositionVelocityController_MC(maxSpeed);
             updatePositionAccelController_MC(deltaMicrosPositionUpdate, NAV_ACCELERATION_XY_MAX, maxSpeed);
+            updateMulticopterXYPosControl(US2S(deltaMicrosPositionUpdate));
 
             navDesiredVelocity[X] = constrain(lrintf(posControl.desiredState.vel.x), -32678, 32767);
             navDesiredVelocity[Y] = constrain(lrintf(posControl.desiredState.vel.y), -32678, 32767);
@@ -990,6 +2676,8 @@ void calculateMulticopterInitialHoldPosition(fpVector3_t * pos)
 
     pos->x = navGetCurrentActualPositionAndVelocity()->pos.x + stoppingDistanceX;
     pos->y = navGetCurrentActualPositionAndVelocity()->pos.y + stoppingDistanceY;
+
+    //getStoppingPointXY(pos); // TODO:
 }
 
 void resetMulticopterHeadingController(void)
@@ -1021,4 +2709,16 @@ void applyMulticopterNavigationController(navigationFSMStateFlags_t navStateFlag
         if (navStateFlags & NAV_CTL_YAW)
             applyMulticopterHeadingController();
     }
+}
+
+void resetMulticopterPositionController(void)
+{
+    for (int axis = 0; axis < 2; axis++) {
+        navPidReset(&posControl.pids.vel[axis]);
+        posControl.rcAdjustment[axis] = 0;
+        lastAccelTargetX = 0.0f;
+        lastAccelTargetY = 0.0f;
+    }
+
+    resetMulticopterXYPosControl();
 }

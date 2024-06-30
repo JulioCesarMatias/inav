@@ -27,49 +27,46 @@
 
 /*
     Square Root Controller calculates the correction based on a proportional controller (kP). 
-    Used only in AutoPilot System for Vertical (Z) control.
+    Used only in AutoPilot System for Horizontal (XY) & Vertical (Z) control.
 */
 
-// Inverse of the sqrt controller. Calculates the input (aka error) to the sqrt_controller required to achieve a given output
-static float sqrtControllerInverse(float kp, float derivative_max, float output)
+// Sets the maximum error to limit output and derivative of output
+void sqrtControllerInit(sqrt_controller_t *sqrt_controller_pointer, const float kp, const float output_min, const float output_max, const float derivative_out_max, sqrtControllerFlags_e sqrtControllerFlags)
 {
-    if ((derivative_max > 0.0f) && (kp == 0.0f)) {
-        return (output * output) / (2.0f * derivative_max);
+
+    // Reset the variables
+    sqrt_controller_pointer->kp = kp;
+    sqrt_controller_pointer->derivative_max = 0.0f;
+    sqrt_controller_pointer->error_min = 0.0f;
+    sqrt_controller_pointer->error_max = 0.0f;
+
+    if (derivative_out_max > 0.0f) {
+        sqrt_controller_pointer->derivative_max = derivative_out_max;
     }
 
-    if (((derivative_max < 0.0f) ||(derivative_max == 0.0f)) && (kp != 0.0f)) {
-        return output / kp;
+    if ((output_min < 0.0f) && (sqrt_controller_pointer->kp > 0.0f) && (sqrtControllerFlags & SQRT_CONTROLLER_POS_Z)) {
+        sqrt_controller_pointer->error_min = sqrtControllerInverse(sqrt_controller_pointer->kp, sqrt_controller_pointer->derivative_max, output_min);
     }
 
-    if (((derivative_max < 0.0f) || (derivative_max == 0.0f)) && (kp == 0.0f)) {
-        return 0.0f;
+    if ((output_max > 0.0f) && (sqrt_controller_pointer->kp > 0.0f)) {
+        sqrt_controller_pointer->error_max = sqrtControllerInverse(sqrt_controller_pointer->kp, sqrt_controller_pointer->derivative_max, output_max);
     }
-
-    // Calculate the velocity at which we switch from calculating the stopping point using a linear function to a sqrt function
-    const float linear_velocity = derivative_max / kp;
-
-    if (fabsf(output) < linear_velocity) {
-        // If our current velocity is below the cross-over point we use a linear function
-        return output / kp;
-    }
-
-    const float linear_dist = derivative_max / sq(kp);
-    const float stopping_dist = (linear_dist * 0.5f) + sq(output) / (2.0f * derivative_max);
-    return (output > 0.0f) ? stopping_dist : -stopping_dist;
 }
 
 // Proportional controller with piecewise sqrt sections to constrain derivative
-float sqrtControllerApply(sqrt_controller_t *sqrt_controller_pointer, float target, float measurement, float deltaTime)
+float sqrtControllerApply(sqrt_controller_t *sqrt_controller_pointer, float target, float measurement, float deltaTime, sqrtControllerFlags_e sqrtControllerFlags)
 {
     float correction_rate;
 
     // Calculate distance error
     sqrt_controller_pointer->error = target - measurement;
 
-    if ((sqrt_controller_pointer->error_min < 0.0f) && (sqrt_controller_pointer->error < sqrt_controller_pointer->error_min)) {
-        sqrt_controller_pointer->error = sqrt_controller_pointer->error_min;
-    } else if ((sqrt_controller_pointer->error_max > 0.0f) && (sqrt_controller_pointer->error > sqrt_controller_pointer->error_max)) {
-        sqrt_controller_pointer->error = sqrt_controller_pointer->error_max;
+    if (sqrtControllerFlags & SQRT_CONTROLLER_POS_Z) {
+        if ((sqrt_controller_pointer->error_min < 0.0f) && (sqrt_controller_pointer->error < sqrt_controller_pointer->error_min)) {
+            sqrt_controller_pointer->error = sqrt_controller_pointer->error_min;
+        } else if ((sqrt_controller_pointer->error_max > 0.0f) && (sqrt_controller_pointer->error > sqrt_controller_pointer->error_max)) {
+            sqrt_controller_pointer->error = sqrt_controller_pointer->error_max;
+        }
     }
 
     if ((sqrt_controller_pointer->derivative_max < 0.0f) || sqrt_controller_pointer->derivative_max == 0.0f) {
@@ -104,25 +101,30 @@ float sqrtControllerApply(sqrt_controller_t *sqrt_controller_pointer, float targ
     return correction_rate; 
 }
 
-// Sets the maximum error to limit output and derivative of output
-void sqrtControllerInit(sqrt_controller_t *sqrt_controller_pointer,const float kp,const float output_min,const float output_max,const float derivative_out_max)
+// Inverse of the sqrt controller. Calculates the input (aka error) to the sqrt_controller required to achieve a given output
+float sqrtControllerInverse(float kp, float derivative_max, float output)
 {
-
-    // Reset the variables
-    sqrt_controller_pointer->kp = kp;
-    sqrt_controller_pointer->derivative_max = 0.0f;
-    sqrt_controller_pointer->error_min = 0.0f;
-    sqrt_controller_pointer->error_max = 0.0f;
-
-    if (derivative_out_max > 0.0f) {
-        sqrt_controller_pointer->derivative_max = derivative_out_max;
+    if ((derivative_max > 0.0f) && (kp == 0.0f)) {
+        return (output * output) / (2.0f * derivative_max);
     }
 
-    if ((output_min < 0.0f) && (sqrt_controller_pointer->kp > 0.0f)) {
-        sqrt_controller_pointer->error_min = sqrtControllerInverse(sqrt_controller_pointer->kp, sqrt_controller_pointer->derivative_max, output_min);
+    if (((derivative_max < 0.0f) ||(derivative_max == 0.0f)) && (kp != 0.0f)) {
+        return output / kp;
     }
 
-    if ((output_max > 0.0f) && (sqrt_controller_pointer->kp > 0.0f)) {
-        sqrt_controller_pointer->error_max = sqrtControllerInverse(sqrt_controller_pointer->kp, sqrt_controller_pointer->derivative_max, output_max);
+    if (((derivative_max < 0.0f) || (derivative_max == 0.0f)) && (kp == 0.0f)) {
+        return 0.0f;
     }
+
+    // Calculate the velocity at which we switch from calculating the stopping point using a linear function to a sqrt function
+    const float linear_velocity = derivative_max / kp;
+
+    if (fabsf(output) < linear_velocity) {
+        // If our current velocity is below the cross-over point we use a linear function
+        return output / kp;
+    }
+
+    const float linear_dist = derivative_max / sq(kp);
+    const float stopping_dist = (linear_dist * 0.5f) + sq(output) / (2.0f * derivative_max);
+    return (output > 0.0f) ? stopping_dist : -stopping_dist;
 }

@@ -176,6 +176,7 @@ void schedulerInit(void);
 void scheduler(void);
 void taskSystem(timeUs_t currentTimeUs);
 void taskRunRealtimeCallbacks(timeUs_t currentTimeUs);
+uint32_t getSchedulerTicks32(void);
 
 #define TASK_PERIOD_HZ(hz) (1000000 / (hz))
 #define TASK_PERIOD_MS(ms) ((ms) * 1000)

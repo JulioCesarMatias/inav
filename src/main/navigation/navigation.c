@@ -1525,6 +1525,11 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_RTH_CLIMB_TO_SAFE_ALT(n
             setDesiredPosition(tmpHomePos, 0, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_Z | NAV_POS_UPDATE_BEARING);
         }
 
+        if (STATE(MULTIROTOR)) {
+            fpVector3_t localPos = navGetCurrentActualPositionAndVelocity()->pos;
+            startMulticopterWPNavigation(localPos, *tmpHomePos);
+        }
+
         return NAV_FSM_EVENT_SUCCESS;   // NAV_STATE_RTH_HEAD_HOME
 
     } else {
@@ -1600,8 +1605,8 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_RTH_HEAD_HOME(navigatio
     // If we have position sensor - continue home
     if ((posControl.flags.estPosStatus >= EST_USABLE)) {
         fpVector3_t * tmpHomePos = rthGetHomeTargetPosition(RTH_HOME_ENROUTE_PROPORTIONAL);
-
-        if (isWaypointReached(tmpHomePos, &posControl.activeWaypoint.bearing)) {
+        const bool wp_reached = /*(STATE(MULTIROTOR)) ? isMulticopterWPReached() :*/ isWaypointReached(tmpHomePos, &posControl.activeWaypoint.bearing);
+        if (wp_reached) {
             // Successfully reached position target - update XYZ-position
             setDesiredPosition(tmpHomePos, posControl.rthState.homePosition.heading, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_Z | NAV_POS_UPDATE_HEADING);
 
@@ -1849,6 +1854,15 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_WAYPOINT_PRE_ACTION(nav
             calculateAndSetActiveWaypoint(&posControl.waypointList[posControl.activeWaypointIndex]);
             posControl.wpInitialDistance = calculateDistanceToDestination(&posControl.activeWaypoint.pos);
             posControl.wpAltitudeReached = false;
+            
+            if (STATE(MULTIROTOR)) {
+                fpVector3_t localPos;
+                fpVector3_t next_localPos;
+                mapWaypointToLocalPosition(&localPos, &posControl.waypointList[posControl.activeWaypointIndex], waypointMissionAltConvMode(posControl.waypointList[posControl.activeWaypointIndex].p3));
+                mapWaypointToLocalPosition(&next_localPos, &posControl.waypointList[posControl.activeWaypointIndex + 1], waypointMissionAltConvMode(posControl.waypointList[posControl.activeWaypointIndex + 1].p3));
+                startMulticopterWPNavigation(localPos, next_localPos);
+            }
+
             return NAV_FSM_EVENT_SUCCESS;       // will switch to NAV_STATE_WAYPOINT_IN_PROGRESS
 
         case NAV_WP_ACTION_JUMP:
@@ -1904,7 +1918,8 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_WAYPOINT_IN_PROGRESS(na
             case NAV_WP_ACTION_HOLD_TIME:
             case NAV_WP_ACTION_WAYPOINT:
             case NAV_WP_ACTION_LAND:
-                if (isWaypointReached(&posControl.activeWaypoint.pos, &posControl.activeWaypoint.bearing)) {
+                const bool wp_reached = /*(STATE(MULTIROTOR)) ? isMulticopterWPReached() :*/ isWaypointReached(&posControl.activeWaypoint.pos, &posControl.activeWaypoint.bearing);
+                if (wp_reached) {
                     return NAV_FSM_EVENT_SUCCESS;   // will switch to NAV_STATE_WAYPOINT_REACHED
                 }
                 else {
@@ -1922,7 +1937,7 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_WAYPOINT_IN_PROGRESS(na
                     }
                     updateClimbRateToAltitudeController(climbRate, posControl.activeWaypoint.pos.z, ROC_TO_ALT_TARGET);
 
-                    if(STATE(MULTIROTOR)) {
+                    if (STATE(MULTIROTOR)) {
                         switch (wpHeadingControl.mode) {
                             case NAV_WP_HEAD_MODE_NONE:
                                 break;
@@ -3356,7 +3371,7 @@ void updateLandingStatus(timeMs_t currentTimeMs)
                 resetLandingDetector();
             } else if (STATE(MULTIROTOR)) {
                 // For multirotor - reactivate landing detector without disarm when throttle raised toward hover throttle
-                landingDetectorIsActive = rxGetChannelValue(THROTTLE) < (0.5 * (currentBatteryProfile->nav.mc.hover_throttle + getThrottleIdleValue()));
+            landingDetectorIsActive = rxGetChannelValue(THROTTLE) < (0.5 * (currentBatteryProfile->nav.mc.hover_throttle + getThrottleIdleValue()));
             }
         }
     } else if (isLandingDetected()) {
@@ -3520,7 +3535,7 @@ static void setupJumpCounters(void)
 
 static void resetJumpCounter(void)
 {
-        // reset the volatile counter from the set / static value
+    // reset the volatile counter from the set / static value
     posControl.waypointList[posControl.activeWaypointIndex].p3 = posControl.waypointList[posControl.activeWaypointIndex].p2;
 }
 

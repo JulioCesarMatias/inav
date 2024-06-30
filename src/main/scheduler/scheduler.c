@@ -36,9 +36,9 @@ STATIC_FASTRAM cfTask_t *currentTask = NULL;
 
 STATIC_FASTRAM uint32_t totalWaitingTasks;
 STATIC_FASTRAM uint32_t totalWaitingTasksSamples;
+STATIC_FASTRAM uint32_t tick_counter32;
 
 FASTRAM uint16_t averageSystemLoadPercent = 0;
-
 
 STATIC_FASTRAM int taskQueuePos = 0;
 STATIC_FASTRAM int taskQueueSize = 0;
@@ -209,6 +209,9 @@ void FAST_CODE NOINLINE scheduler(void)
 {
     // Cache currentTime
     const timeUs_t currentTimeUs = micros();
+    
+    // tell the scheduler one tick has passed
+    tick_counter32++;
 
     // The task to be invoked
     cfTask_t *selectedTask = NULL;
@@ -294,4 +297,10 @@ void FAST_CODE NOINLINE scheduler(void)
         selectedTask->totalExecutionTime += taskExecutionTime;   // time consumed by scheduler + task
         selectedTask->maxExecutionTime = MAX(selectedTask->maxExecutionTime, taskExecutionTime);
     }
+}
+
+// return current tick counter
+uint32_t getSchedulerTicks32(void) 
+{ 
+    return tick_counter32;
 }

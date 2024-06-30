@@ -580,6 +580,8 @@ main_sources(COMMON_SRC
     navigation/sqrt_controller.h
     navigation/rth_trackback.c
     navigation/rth_trackback.h
+    navigation/scurve.c
+    navigation/scurve.h
 
     sensors/barometer.c
     sensors/barometer.h

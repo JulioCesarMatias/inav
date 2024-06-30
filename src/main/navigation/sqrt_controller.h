@@ -17,7 +17,12 @@
 
 #pragma once
 
-typedef struct sqrt_controller_s { 
+typedef enum {
+    SQRT_CONTROLLER_POS_XY = 1 << 0,
+    SQRT_CONTROLLER_POS_Z  = 1 << 1,
+} sqrtControllerFlags_e;
+
+typedef struct { 
     float kp;             // proportional gain
     float error;          // error calced
     float error_min;      // error limit in negative direction
@@ -25,5 +30,6 @@ typedef struct sqrt_controller_s {
     float derivative_max; // maximum derivative of output
 } sqrt_controller_t;
 
-float sqrtControllerApply(sqrt_controller_t *sqrt_controller_pointer, float target, float measurement, float deltaTime);
-void sqrtControllerInit(sqrt_controller_t *sqrt_controller_pointer, const float kp, const float output_min, const float output_max, const float derivative_out_max);
+void sqrtControllerInit(sqrt_controller_t *sqrt_controller_pointer, const float kp, const float output_min, const float output_max, const float derivative_out_max, sqrtControllerFlags_e sqrtControllerFlags);
+float sqrtControllerApply(sqrt_controller_t *sqrt_controller_pointer, float target, float measurement, float deltaTime, sqrtControllerFlags_e sqrtControllerFlags);
+float sqrtControllerInverse(float kp, float derivative_max, float output);
